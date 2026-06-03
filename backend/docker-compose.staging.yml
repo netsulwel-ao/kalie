@@ -1,0 +1,31 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────
+#  STAGING override — production-like, HTTPS, rate limiting
+#  Run: docker compose -f docker-compose.yml -f docker-compose.staging.yml up
+# ─────────────────────────────────────────────
+
+services:
+  api:
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
+    env_file:
+      - .env.staging
+    environment:
+      - ENVIRONMENT=staging
+      - DEBUG=false
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    container_name: kalie_nginx_staging
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/staging.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/nginx/certs:/etc/nginx/certs:ro
+    depends_on:
+      - api
+    networks:
+      - kalie_net
+    restart: always

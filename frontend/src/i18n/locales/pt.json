@@ -1,0 +1,72 @@
+{
+  "common": {
+    "loading": "A carregar...",
+    "error": "Ocorreu um erro",
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "back": "Voltar",
+    "next": "Seguinte",
+    "submit": "Enviar",
+    "you": "Tu",
+    "or": "ou"
+  },
+  "auth": {
+    "login": "Entrar",
+    "register": "Criar conta",
+    "logout": "Sair",
+    "email": "Email",
+    "password": "Senha",
+    "full_name": "Nome completo",
+    "username": "Nome de utilizador",
+    "phone": "Telefone (opcional)",
+    "forgot_password": "Esqueci a senha",
+    "reset_password": "Redefinir senha",
+    "verify_email": "Verificar email",
+    "login_with_google": "Entrar com Google",
+    "no_account": "Não tem conta?",
+    "have_account": "Já tem conta?",
+    "totp_code": "Código de autenticação (2FA)",
+    "email_sent": "Email enviado! Verifique a sua caixa de entrada.",
+    "password_reset_success": "Senha redefinida com sucesso!",
+    "email_verified": "Email verificado com sucesso!"
+  },
+  "nav": {
+    "feed": "Feed",
+    "games": "Jogos",
+    "tournaments": "Torneios",
+    "raffles": "Rifas",
+    "auctions": "Leilões",
+    "wallet": "Carteira",
+    "bisno": "Bisno Rápido",
+    "explore": "Explorar",
+    "sos": "SOS",
+    "settings": "Definições",
+    "help": "Ajuda"
+  },
+  "feed": {
+    "placeholder": "Partilhe uma actualização ou lance um módulo...",
+    "post": "Publicar",
+    "trending": "Em Destaque",
+    "active_bisnos": "Bisnos Activos"
+  },
+  "games": {
+    "join_tournament": "Entrar no Torneio",
+    "create_match": "Criar Partida",
+    "invite_friend": "Convidar Amigo",
+    "prize_pool": "Prémio Total",
+    "players_online": "Jogadores Online",
+    "starts_in": "Começa em",
+    "live_now": "Ao Vivo"
+  },
+  "wallet": {
+    "balance": "Saldo",
+    "deposit": "Depositar",
+    "withdraw": "Levantar",
+    "send": "Enviar",
+    "receive": "Receber",
+    "history": "Histórico",
+    "currency": "AOA",
+    "secured": "Protegido pelo Kalie Vault"
+  }
+}

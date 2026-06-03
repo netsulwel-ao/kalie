@@ -1,0 +1,14 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Instala dependências primeiro (layer cache)
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# Em dev, o código é montado via volume
+# O CMD inicia o Vite dev server com HMR
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

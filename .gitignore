@@ -1,0 +1,46 @@
+# ── Secrets — NUNCA commitar ─────────────────────────────────────
+.env
+.env.dev
+.env.staging
+.env.prod
+*.env
+frontend/.env.local
+
+# ── Python ───────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# ── Node ─────────────────────────────────────────────────────────
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# ── Docker volumes ────────────────────────────────────────────────
+postgres_data/
+redis_data/
+
+# ── Certs ────────────────────────────────────────────────────────
+docker/nginx/certs/
+
+# ── IDE ──────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── Logs ─────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ───────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# -- unecessary folders
+games/
+template/
+base.md
+project.md

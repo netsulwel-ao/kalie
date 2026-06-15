@@ -40,7 +40,7 @@ logs/
 Thumbs.db
 
 # -- unecessary folders
-games/
+games_temp/
 template/
 base.md
 project.md

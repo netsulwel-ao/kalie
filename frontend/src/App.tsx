@@ -25,7 +25,7 @@ import SOSPage from "@/pages/SOSPage";
 import DefinicoesPage from "@/pages/DefinicoesPage";
 import AjudaPage from "@/pages/AjudaPage";
 import ChessPage from "@/pages/games/ChessPage";
-import NTIPage from "@/pages/games/NTIPage";
+import TicTacToePage from "@/pages/games/TicTacToePage";
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
@@ -54,7 +54,7 @@ export default function App() {
         <Route path="/"          element={<FeedPage />} />
         <Route path="/jogos"     element={<GamesPage />} />
         <Route path="/jogos/xadrez/:challengeId" element={<ChessPage />} />
-        <Route path="/jogos/nti/:challengeId" element={<NTIPage />} />
+        <Route path="/jogos/tictactoe/:challengeId" element={<TicTacToePage />} />
         <Route path="/torneios"  element={<TorneiosPage />} />
         <Route path="/rifas"     element={<RifasPage />} />
         <Route path="/leiloes"   element={<LeiloesPage />} />

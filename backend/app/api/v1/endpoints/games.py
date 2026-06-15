@@ -60,6 +60,11 @@ def _challenge_to_dict(c: Challenge, current_user_id: str) -> dict:
             my_color = c.creator_color
         elif opp_id and uid == opp_id:
             my_color = "black" if c.creator_color == "white" else "white"
+    elif c.game_type == GameType.TICTACTOE:
+        if uid == creator_id:
+            my_color = "X"
+        elif opp_id and uid == opp_id:
+            my_color = "O"
 
     is_my_turn = False
     if c.game_type == GameType.CHESS and state and c.status == ChallengeStatus.IN_PROGRESS:
@@ -73,6 +78,11 @@ def _challenge_to_dict(c: Challenge, current_user_id: str) -> dict:
                 )
             except Exception:
                 pass
+    elif c.game_type == GameType.TICTACTOE and state and c.status == ChallengeStatus.IN_PROGRESS:
+        is_my_turn = (
+            state.get("current_player") == my_color and
+            state.get("winner") is None
+        )
 
     return {
         "id": str(c.id),
@@ -160,6 +170,14 @@ async def create_challenge(data: CreateChallengeRequest, db: DB, current_user: V
     elif data.game_type == GameType.LUDO:
         from app.services.nti_engine import initial_state as nti_initial
         initial_state = json.dumps(nti_initial(num_players=2))
+    elif data.game_type == GameType.TICTACTOE:
+        initial_state = json.dumps({
+            "board": [None] * 9,
+            "current_player": "X",  # X always starts (creator = X)
+            "winner": None,
+            "move_count": 0,
+            "game_started": False,
+        })
 
     challenge = Challenge(
         game_type=data.game_type,
@@ -313,7 +331,30 @@ async def join_challenge(challenge_id: uuid.UUID, db: DB, current_user: Verified
     challenge.opponent_id = current_user.id
     await db.flush()
     await db.refresh(challenge, ["creator", "opponent"])
-    return _challenge_to_dict(challenge, str(current_user.id))
+    await db.commit()
+
+    # Notify creator via WebSocket — load fresh challenge with all relations
+    from app.api.v1.endpoints.games_ws import _rooms, _send, _build_state, _load_challenge, _user_dict
+    room_key = str(challenge_id)
+    opp_id = str(current_user.id)
+
+    if room_key in _rooms:
+        fresh = await _load_challenge(str(challenge_id))
+        if fresh:
+            state_data = json.loads(fresh.game_state) if fresh.game_state else {}
+            for uid, ws in list(_rooms[room_key].items()):
+                if uid == opp_id:
+                    continue
+                await _send(ws, {
+                    "type": "player_joined",
+                    "player": _user_dict(current_user),
+                    "challenge": _build_state(fresh, state_data, uid),
+                })
+
+    # Return fresh dict using already-refreshed challenge
+    return _challenge_to_dict(challenge, opp_id)
+
+    return result
 
 
 @router.post("/challenges/{challenge_id}/move")

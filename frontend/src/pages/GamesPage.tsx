@@ -14,7 +14,7 @@ interface UserResult { id: string; username: string; full_name: string; avatar_u
 // ── Create challenge modal ────────────────────────────────────────────────────
 function CreateChallengeModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
-  const [gameType, setGameType] = useState<"chess" | "ludo">("chess");
+  const [gameType, setGameType] = useState<"chess" | "tictactoe">("chess");
   const [color, setColor] = useState<"white" | "black" | "random">("random");
   const [timeControl, setTimeControl] = useState(600);
   const [loading, setLoading] = useState(false);
@@ -76,7 +76,7 @@ function CreateChallengeModal({ onClose }: { onClose: () => void }) {
   function goToGame() {
     onClose();
     if (gameType === "chess") navigate(`/jogos/xadrez/${createdId}`);
-    else navigate(`/jogos/nti/${createdId}`);
+    else navigate(`/jogos/tictactoe/${createdId}`);
   }
 
   async function handleJoin() {
@@ -88,7 +88,7 @@ function CreateChallengeModal({ onClose }: { onClose: () => void }) {
       await api.post(`/games/challenges/${found.id}/join`);
       onClose();
       if (found.game_type === "chess") navigate(`/jogos/xadrez/${found.id}`);
-      else navigate(`/jogos/nti/${found.id}`);
+      else navigate(`/jogos/tictactoe/${found.id}`);
     } catch (err) {
       setError(extractApiError(err));
     } finally {
@@ -131,7 +131,10 @@ function CreateChallengeModal({ onClose }: { onClose: () => void }) {
                 <div className="mb-5">
                   <p className="text-label-caps text-themed-muted uppercase mb-3">Jogo</p>
                   <div className="grid grid-cols-2 gap-3">
-                    {([{ id: "chess", label: "Xadrez", icon: Swords }, { id: "ludo", label: "NTI", icon: Gamepad2 }] as const).map(({ id, label, icon: Icon }) => (
+                    {([
+                      { id: "chess",     label: "Xadrez",        icon: Swords   },
+                      { id: "tictactoe", label: "Jogo da Velha", icon: Gamepad2 },
+                    ] as const).map(({ id, label, icon: Icon }) => (
                       <button key={id} onClick={() => setGameType(id)}
                         className={cn("flex flex-col items-center gap-2 py-4 rounded-xl border transition-all",
                           gameType === id ? "bg-accent-bisno/10 border-accent-bisno/40 text-accent-bisno" : "glass-panel border-white/10 text-themed-muted hover:border-white/20")}>
@@ -271,23 +274,31 @@ function CreateChallengeModal({ onClose }: { onClose: () => void }) {
 // ── Games list ────────────────────────────────────────────────────────────────
 const games = [
   {
-    id: "chess", name: "Xadrez", description: "Jogo de estratégia clássico. Desafia jogadores de todo Angola.",
-    players: "1.204", prize: "2.500 AOA", status: "Começa em 15m", statusColor: "text-zinc-400",
+    id: "chess",
+    name: "Xadrez",
+    description: "Jogo de estratégia clássico. Desafia jogadores de todo Angola.",
+    players: "1.204", prize: "2.500 AOA", status: "Ao Vivo", statusColor: "text-accent-feed",
     accent: "border-accent-bisno/30 bg-accent-bisno/5", icon: Swords, iconColor: "text-accent-bisno",
     coverImage: "/imgs/capa-xadrez.png",
+    comingSoon: false,
   },
   {
-    id: "ludo", name: "NTI (Não te Irrites)", description: "O clássico jogo de tabuleiro angolano. Até 4 jogadores.",
-    players: "4.892", prize: "1.000 AOA", status: "Ao Vivo", statusColor: "text-accent-feed",
-    accent: "border-accent-feed/30 bg-accent-feed/5", icon: Gamepad2, iconColor: "text-accent-feed",
-    coverImage: "/imgs/capa-nti.png",
-  },
-  {
-    id: "dama", name: "Dama", description: "Jogo de damas tradicional. Em breve disponível.",
-    players: "850", prize: "750 AOA", status: "2 Vagas", statusColor: "text-accent-gold",
-    accent: "border-accent-gold/30 bg-accent-gold/5", icon: Shield, iconColor: "text-accent-gold",
-    comingSoon: true,
+    id: "tictactoe",
+    name: "Jogo da Velha",
+    description: "O clássico jogo X e O. Rápido, intenso e estratégico. 2 jogadores.",
+    players: "892", prize: "500 AOA", status: "Ao Vivo", statusColor: "text-accent-feed",
+    accent: "border-accent-games/30 bg-accent-games/5", icon: Gamepad2, iconColor: "text-accent-games",
     coverImage: null,
+    comingSoon: false,
+  },
+  {
+    id: "dama",
+    name: "Dama",
+    description: "Jogo de damas tradicional. Em breve disponível.",
+    players: "850", prize: "750 AOA", status: "Em Breve", statusColor: "text-accent-gold",
+    accent: "border-accent-gold/30 bg-accent-gold/5", icon: Shield, iconColor: "text-accent-gold",
+    coverImage: null,
+    comingSoon: true,
   },
 ];
 
@@ -328,6 +339,19 @@ export default function GamesPage() {
                     />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
                   </>
+                ) : game.id === "tictactoe" ? (
+                  <div className="w-full h-full flex items-center justify-center"
+                    style={{ background: "linear-gradient(135deg, #1a0a2e 0%, #0d1b3e 100%)" }}>
+                    {/* Mini TTT board preview */}
+                    <div className="grid grid-cols-3 gap-1" style={{ width: 90 }}>
+                      {["✕","○","✕","○","✕","○","○","✕","○"].map((s, i) => (
+                        <div key={i} className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black"
+                          style={{ background: "rgba(255,255,255,0.06)", color: s === "✕" ? "#ef4444" : "#3b82f6" }}>
+                          {s}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 ) : (
                   <div className="w-full h-full bg-surface-container-high flex items-center justify-center">
                     <Icon className={cn("w-16 h-16 opacity-20", game.iconColor)} />

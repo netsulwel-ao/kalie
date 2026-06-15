@@ -89,6 +89,14 @@ def _build_state(c: Challenge, state: dict, user_id: str) -> dict:
             my_color = "black" if c.creator_color == "white" else "white"
         else:
             my_color = None
+    elif c.game_type == GameType.TICTACTOE:
+        # Creator = X, opponent = O
+        if uid == creator_id:
+            my_color = "X"
+        elif opp_id and uid == opp_id:
+            my_color = "O"
+        else:
+            my_color = None
     else:
         # NTI: creator = first color in player_order, opponent = second
         order = state.get("player_order", ["red", "green"]) if state else ["red", "green"]
@@ -111,6 +119,11 @@ def _build_state(c: Challenge, state: dict, user_id: str) -> dict:
                 )
             except Exception:
                 pass
+        elif c.game_type == GameType.TICTACTOE:
+            is_my_turn = (
+                state.get("current_player") == my_color and
+                state.get("winner") is None
+            )
         else:
             # NTI: it's my turn if current_player matches my color
             # AND there are valid moves OR dice haven't been rolled yet
@@ -272,6 +285,11 @@ async def game_ws(websocket: WebSocket, challenge_id: str):
                     if isinstance(tc, int) and 60 <= tc <= 3600:
                         fresh.time_control = tc
                     fresh.status = ChallengeStatus.IN_PROGRESS
+                    # Mark game_started in state for TTT
+                    if fresh.game_type == GameType.TICTACTOE and fresh.game_state:
+                        gs = json.loads(fresh.game_state)
+                        gs["game_started"] = True
+                        fresh.game_state = json.dumps(gs)
                     await db.commit()
 
                 # Reload and broadcast
@@ -291,6 +309,73 @@ async def game_ws(websocket: WebSocket, challenge_id: str):
 
                 if c.status != ChallengeStatus.IN_PROGRESS:
                     await _send(websocket, {"type": "error", "detail": "Jogo não está em curso"})
+                    continue
+
+                # ── TicTacToe move ────────────────────────────────
+                if c.game_type == GameType.TICTACTOE:
+                    uid = str(user.id)
+                    state = json.loads(c.game_state)
+                    creator_id = str(c.creator_id)
+                    opp_id = str(c.opponent_id) if c.opponent_id else None
+
+                    my_sym = "X" if uid == creator_id else "O"
+                    if state.get("current_player") != my_sym:
+                        await _send(websocket, {"type": "error", "detail": "Não é a tua vez"})
+                        continue
+
+                    pos = msg.get("position")
+                    if pos is None or not isinstance(pos, int) or pos < 0 or pos > 8:
+                        await _send(websocket, {"type": "error", "detail": "Posição inválida"})
+                        continue
+
+                    board_state = state.get("board", [None] * 9)
+                    if board_state[pos] is not None:
+                        await _send(websocket, {"type": "error", "detail": "Casa já ocupada"})
+                        continue
+
+                    board_state[pos] = my_sym
+                    state["board"] = board_state
+                    state["move_count"] = state.get("move_count", 0) + 1
+                    state["current_player"] = "O" if my_sym == "X" else "X"
+
+                    # Check winner
+                    LINES = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
+                    winner_sym = None
+                    for a, b, c_idx in LINES:
+                        if board_state[a] and board_state[a] == board_state[b] == board_state[c_idx]:
+                            winner_sym = board_state[a]
+                            break
+
+                    is_draw = winner_sym is None and all(cell is not None for cell in board_state)
+                    finished = winner_sym is not None or is_draw
+
+                    if winner_sym:
+                        state["winner"] = winner_sym
+                    elif is_draw:
+                        state["winner"] = "draw"
+
+                    async with AsyncSessionLocal() as db:
+                        fresh = await db.get(Challenge, challenge_id)
+                        if not fresh:
+                            continue
+                        fresh.game_state = json.dumps(state)
+                        if finished:
+                            fresh.status = ChallengeStatus.FINISHED
+                            if winner_sym:
+                                fresh.finish_reason = "win"
+                                import uuid as _uuid
+                                if winner_sym == "X":
+                                    fresh.winner_id = fresh.creator_id
+                                else:
+                                    fresh.winner_id = fresh.opponent_id
+                            else:
+                                fresh.finish_reason = "draw"
+                        await db.commit()
+
+                    c = await _load_challenge(challenge_id)
+                    if not c:
+                        continue
+                    await _broadcast_state(room_key, c, state)
                     continue
 
                 # ── NTI move ──────────────────────────────────────

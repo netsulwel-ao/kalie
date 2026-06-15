@@ -14,8 +14,9 @@ from app.core.database import Base
 
 
 class GameType(str, Enum):
-    CHESS = "chess"
-    LUDO  = "ludo"
+    CHESS      = "chess"
+    LUDO       = "ludo"
+    TICTACTOE  = "tictactoe"
 
 
 class ChallengeStatus(str, Enum):

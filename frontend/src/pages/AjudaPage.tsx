@@ -7,7 +7,7 @@ import {
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 
-// ── FAQ data ──────────────────────────────────────────────────────────────────
+// ── FAQ data  ──────────────────────────────────────────────────────────────────
 const faqItems = [
   {
     icon: Shield,

@@ -16,6 +16,7 @@ from app.core.database import engine, Base
 from app.api.v1.router import api_router
 from app.core.middleware import SecurityHeadersMiddleware
 from app.api.v1.endpoints.games_ws import router as game_ws_router
+from app.api.v1.endpoints.squid_ws import router as squid_ws_router
 
 
 @asynccontextmanager
@@ -69,7 +70,8 @@ if not settings.DEBUG:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(api_router, prefix="/api/v1")
-app.include_router(game_ws_router)  # WebSocket at /ws/game/{id}
+app.include_router(game_ws_router)   # WebSocket at /ws/game/{id}
+app.include_router(squid_ws_router)  # WebSocket at /ws/squid/{code} + REST at /squid/rooms
 
 
 @app.get("/health", tags=["System"])

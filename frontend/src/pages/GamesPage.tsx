@@ -11,10 +11,76 @@ import api, { extractApiError } from "@/services/api";
 
 interface UserResult { id: string; username: string; full_name: string; avatar_url: string | null; }
 
+// ── Squid Game button ─────────────────────────────────────────────────────────
+function SquidGameButton() {
+  const navigate = useNavigate();
+  const [showSquid, setShowSquid] = useState(false);
+  const [squidCode, setSquidCode] = useState("");
+  const [squidLoading, setSquidLoading] = useState(false);
+  const [squidError, setSquidError] = useState("");
+
+  async function createSquidRoom() {
+    setSquidLoading(true); setSquidError("");
+    try {
+      const { data } = await api.post("/squid/rooms");
+      navigate(`/jogos/squid/${data.code}`);
+    } catch (e) {
+      setSquidError(extractApiError(e));
+    } finally { setSquidLoading(false); }
+  }
+
+  async function joinSquidRoom() {
+    if (!squidCode.trim()) return;
+    setSquidLoading(true); setSquidError("");
+    try {
+      const { data } = await api.get(`/squid/rooms/${squidCode.trim().toUpperCase()}`);
+      if (!data.exists) { setSquidError("Sala não encontrada."); setSquidLoading(false); return; }
+      navigate(`/jogos/squid/${squidCode.trim().toUpperCase()}`);
+    } catch (e) {
+      setSquidError(extractApiError(e));
+    } finally { setSquidLoading(false); }
+  }
+
+  if (!showSquid) return (
+    <Button className="w-full bg-accent-sos text-white hover:brightness-110" onClick={() => setShowSquid(true)}>
+      Jogar Agora
+    </Button>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+      <div className="glass-panel luminous-edge rounded-2xl p-6 w-full max-w-sm border border-accent-sos/30">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="text-h3 font-space-grotesk text-themed-primary">Squid Game</h3>
+          <button onClick={() => setShowSquid(false)} className="text-themed-muted hover:text-themed-primary">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="flex flex-col gap-3">
+          <Button className="w-full bg-accent-sos text-white hover:brightness-110"
+            onClick={createSquidRoom} loading={squidLoading}>
+            <Plus className="w-4 h-4 mr-2" /> Criar Nova Sala
+          </Button>
+          <div className="flex gap-2">
+            <input value={squidCode} onChange={e => setSquidCode(e.target.value.toUpperCase())}
+              className="flex-1 input-themed rounded-xl px-4 py-2.5 text-body-sm font-mono uppercase tracking-widest text-center"
+              placeholder="SQ-XXXXX" maxLength={8} />
+            <Button className="bg-accent-bisno text-surface" onClick={joinSquidRoom} loading={squidLoading}
+              disabled={!squidCode.trim()}>
+              Entrar
+            </Button>
+          </div>
+          {squidError && <p className="text-accent-sos text-sm">{squidError}</p>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Create challenge modal ────────────────────────────────────────────────────
 function CreateChallengeModal({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
-  const [gameType, setGameType] = useState<"chess" | "tictactoe">("chess");
+  const [gameType, setGameType] = useState<"chess" | "tictactoe" | "checkers">("chess");
   const [color, setColor] = useState<"white" | "black" | "random">("random");
   const [timeControl, setTimeControl] = useState(600);
   const [loading, setLoading] = useState(false);
@@ -76,6 +142,7 @@ function CreateChallengeModal({ onClose }: { onClose: () => void }) {
   function goToGame() {
     onClose();
     if (gameType === "chess") navigate(`/jogos/xadrez/${createdId}`);
+    else if (gameType === "checkers") navigate(`/jogos/damas/${createdId}`);
     else navigate(`/jogos/tictactoe/${createdId}`);
   }
 
@@ -88,6 +155,7 @@ function CreateChallengeModal({ onClose }: { onClose: () => void }) {
       await api.post(`/games/challenges/${found.id}/join`);
       onClose();
       if (found.game_type === "chess") navigate(`/jogos/xadrez/${found.id}`);
+      else if (found.game_type === "checkers") navigate(`/jogos/damas/${found.id}`);
       else navigate(`/jogos/tictactoe/${found.id}`);
     } catch (err) {
       setError(extractApiError(err));
@@ -130,10 +198,11 @@ function CreateChallengeModal({ onClose }: { onClose: () => void }) {
                 {/* Game type */}
                 <div className="mb-5">
                   <p className="text-label-caps text-themed-muted uppercase mb-3">Jogo</p>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-3 gap-3">
                     {([
                       { id: "chess",     label: "Xadrez",        icon: Swords   },
                       { id: "tictactoe", label: "Jogo da Velha", icon: Gamepad2 },
+                      { id: "checkers",  label: "Dama",          icon: Shield   },
                     ] as const).map(({ id, label, icon: Icon }) => (
                       <button key={id} onClick={() => setGameType(id)}
                         className={cn("flex flex-col items-center gap-2 py-4 rounded-xl border transition-all",
@@ -292,13 +361,24 @@ const games = [
     comingSoon: false,
   },
   {
+    id: "squid",
+    name: "Squid Game",
+    description: "Luz Verde, Luz Vermelha. Avança enquanto podes. Para quando ela olhar para ti.",
+    players: "2.341", prize: "1.500 AOA", status: "Ao Vivo", statusColor: "text-accent-sos",
+    accent: "border-accent-sos/30 bg-accent-sos/5", icon: Gamepad2, iconColor: "text-accent-sos",
+    coverImage: null,
+    comingSoon: false,
+    isSquid: true,
+    hidden: true,
+  },
+  {
     id: "dama",
     name: "Dama",
-    description: "Jogo de damas tradicional. Em breve disponível.",
-    players: "850", prize: "750 AOA", status: "Em Breve", statusColor: "text-accent-gold",
+    description: "Jogo de damas angolano. Captura obrigatória, regras locais. 2 jogadores.",
+    players: "850", prize: "750 AOA", status: "Ao Vivo", statusColor: "text-accent-gold",
     accent: "border-accent-gold/30 bg-accent-gold/5", icon: Shield, iconColor: "text-accent-gold",
     coverImage: null,
-    comingSoon: true,
+    comingSoon: false,
   },
 ];
 
@@ -324,7 +404,7 @@ export default function GamesPage() {
 
       {/* Games grid */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-10">
-        {games.map((game) => {
+        {games.filter(g => !(g as any).hidden).map((game) => {
           const Icon = game.icon;
           return (
             <div key={game.id} className={cn("glass-panel luminous-edge rounded-xl overflow-hidden border transition-all hover:border-white/20 flex flex-col", game.accent)}>
@@ -342,12 +422,41 @@ export default function GamesPage() {
                 ) : game.id === "tictactoe" ? (
                   <div className="w-full h-full flex items-center justify-center"
                     style={{ background: "linear-gradient(135deg, #1a0a2e 0%, #0d1b3e 100%)" }}>
-                    {/* Mini TTT board preview */}
                     <div className="grid grid-cols-3 gap-1" style={{ width: 90 }}>
                       {["✕","○","✕","○","✕","○","○","✕","○"].map((s, i) => (
                         <div key={i} className="w-7 h-7 rounded-lg flex items-center justify-center text-sm font-black"
                           style={{ background: "rgba(255,255,255,0.06)", color: s === "✕" ? "#ef4444" : "#3b82f6" }}>
                           {s}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : game.id === "squid" ? (
+                  <div className="w-full h-full flex items-center justify-center"
+                    style={{ background: "linear-gradient(135deg, #0f1a0f 0%, #1a2e1a 100%)" }}>
+                    <div className="text-center">
+                      <div className="text-5xl mb-2">🦑</div>
+                      <div className="flex gap-3 justify-center">
+                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-green-500/20 text-green-400 border border-green-500/30">🟢 Verde</span>
+                        <span className="px-3 py-1 rounded-full text-xs font-bold bg-red-500/20 text-red-400 border border-red-500/30">🔴 Vermelha</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : game.id === "dama" ? (
+                  <div className="w-full h-full flex items-center justify-center"
+                    style={{ background: "linear-gradient(135deg, #1a1200 0%, #2d1f00 100%)" }}>
+                    {/* Mini checkers board */}
+                    <div className="grid grid-cols-4 gap-0.5" style={{ width: 76 }}>
+                      {[
+                        [1,"bp"],[0,""],[1,"bp"],[0,""],
+                        [0,""],[1,""],[0,""],[1,""],
+                        [1,""],[0,""],[1,""],[0,""],
+                        [0,""],[1,"wp"],[0,""],[1,"wp"],
+                      ].map(([dark, piece], i) => (
+                        <div key={i} className="w-[18px] h-[18px] flex items-center justify-center"
+                          style={{ background: dark ? "#5d4037" : "#d7ccc8" }}>
+                          {piece === "wp" && <div className="w-3 h-3 rounded-full bg-gradient-to-br from-white to-zinc-200 border border-zinc-400" />}
+                          {piece === "bp" && <div className="w-3 h-3 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-950 border border-zinc-500" />}
                         </div>
                       ))}
                     </div>
@@ -381,6 +490,8 @@ export default function GamesPage() {
                 </div>
                 {game.comingSoon ? (
                   <Button variant="glass" className="w-full opacity-50 cursor-not-allowed" disabled>Em breve</Button>
+                ) : (game as any).isSquid ? (
+                  <SquidGameButton />
                 ) : (
                   <Button className="w-full bg-accent-bisno text-surface hover:brightness-110" onClick={() => setShowModal(true)}>
                     Jogar Agora

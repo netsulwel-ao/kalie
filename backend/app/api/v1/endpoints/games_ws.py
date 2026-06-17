@@ -1,7 +1,6 @@
 """
-WebSocket endpoint for real-time chess game.
-Backend is the SINGLE source of truth.
-Each operation opens a fresh DB session to avoid stale state.
+WebSocket endpoint — real-time game handler.
+Uses in-memory _rooms dict (single worker, no --reload).
 """
 import asyncio
 import json
@@ -22,14 +21,12 @@ from app.models.user import User
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# ── Room registry ─────────────────────────────────────────────────────────────
 # challenge_id → { user_id: websocket }
 _rooms: dict[str, dict[str, WebSocket]] = {}
 
 
-# ── DB helpers ────────────────────────────────────────────────────────────────
+# ── DB ────────────────────────────────────────────────────────────────────────
 async def _load_challenge(challenge_id: str) -> Challenge | None:
-    """Load challenge with all relationships from a fresh DB session."""
     async with AsyncSessionLocal() as db:
         result = await db.execute(
             select(Challenge)
@@ -48,7 +45,7 @@ async def _load_user(user_id: str) -> User | None:
         return await db.get(User, user_id)
 
 
-# ── Send helpers ──────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 async def _send(ws: WebSocket, msg: dict) -> bool:
     try:
         await ws.send_json(msg)
@@ -57,20 +54,6 @@ async def _send(ws: WebSocket, msg: dict) -> bool:
         return False
 
 
-async def _broadcast_room(room_key: str, msg: dict, exclude_uid: str | None = None):
-    room = _rooms.get(room_key, {})
-    dead = []
-    for uid, ws in list(room.items()):
-        if uid == exclude_uid:
-            continue
-        ok = await _send(ws, msg)
-        if not ok:
-            dead.append(uid)
-    for uid in dead:
-        room.pop(uid, None)
-
-
-# ── State builder ─────────────────────────────────────────────────────────────
 def _user_dict(u: User) -> dict:
     return {"id": str(u.id), "username": u.username,
             "full_name": u.full_name, "avatar_url": u.avatar_url}
@@ -81,52 +64,34 @@ def _build_state(c: Challenge, state: dict, user_id: str) -> dict:
     creator_id = str(c.creator_id)
     opp_id = str(c.opponent_id) if c.opponent_id else None
 
-    # Determine this user's color
     if c.game_type == GameType.CHESS:
-        if uid == creator_id:
-            my_color = c.creator_color
-        elif opp_id and uid == opp_id:
-            my_color = "black" if c.creator_color == "white" else "white"
-        else:
-            my_color = None
+        my_color = c.creator_color if uid == creator_id else (
+            ("black" if c.creator_color == "white" else "white") if opp_id and uid == opp_id else None
+        )
     elif c.game_type == GameType.TICTACTOE:
-        # Creator = X, opponent = O
-        if uid == creator_id:
-            my_color = "X"
-        elif opp_id and uid == opp_id:
-            my_color = "O"
-        else:
-            my_color = None
+        my_color = "X" if uid == creator_id else ("O" if opp_id and uid == opp_id else None)
+    elif c.game_type == GameType.CHECKERS:
+        my_color = "white" if uid == creator_id else ("black" if opp_id and uid == opp_id else None)
     else:
-        # NTI: creator = first color in player_order, opponent = second
         order = state.get("player_order", ["red", "green"]) if state else ["red", "green"]
-        if uid == creator_id:
-            my_color = order[0] if order else "red"
-        elif opp_id and uid == opp_id:
-            my_color = order[1] if len(order) > 1 else "green"
-        else:
-            my_color = None
+        my_color = order[0] if uid == creator_id else (
+            (order[1] if len(order) > 1 else "green") if opp_id and uid == opp_id else None
+        )
 
-    # Determine if it's this user's turn
     is_my_turn = False
     if my_color and c.status == ChallengeStatus.IN_PROGRESS and state:
         if c.game_type == GameType.CHESS:
             try:
-                board = chess.Board(state["fen"])
-                is_my_turn = (
-                    (my_color == "white" and board.turn == chess.WHITE) or
-                    (my_color == "black" and board.turn == chess.BLACK)
-                )
+                b = chess.Board(state["fen"])
+                is_my_turn = (my_color == "white" and b.turn == chess.WHITE) or \
+                             (my_color == "black" and b.turn == chess.BLACK)
             except Exception:
                 pass
         elif c.game_type == GameType.TICTACTOE:
-            is_my_turn = (
-                state.get("current_player") == my_color and
-                state.get("winner") is None
-            )
+            is_my_turn = state.get("current_player") == my_color and state.get("winner") is None
+        elif c.game_type == GameType.CHECKERS:
+            is_my_turn = state.get("current_player") == my_color and state.get("winner") is None
         else:
-            # NTI: it's my turn if current_player matches my color
-            # AND there are valid moves OR dice haven't been rolled yet
             is_my_turn = (
                 state.get("current_player") == my_color and
                 (state.get("dice") is None or
@@ -135,29 +100,35 @@ def _build_state(c: Challenge, state: dict, user_id: str) -> dict:
             )
 
     return {
-        "id": str(c.id),
-        "game_type": c.game_type,
-        "status": c.status,
-        "invite_code": c.invite_code,
-        "time_control": c.time_control,
-        "current_turn": c.current_turn,
-        "creator_color": c.creator_color,
+        "id": str(c.id), "game_type": c.game_type, "status": c.status,
+        "invite_code": c.invite_code, "time_control": c.time_control,
+        "current_turn": c.current_turn, "creator_color": c.creator_color,
         "game_state": state,
         "winner_id": str(c.winner_id) if c.winner_id else None,
         "finish_reason": c.finish_reason,
         "creator": _user_dict(c.creator) if c.creator else None,
         "opponent": _user_dict(c.opponent) if c.opponent else None,
-        "is_my_turn": is_my_turn,
-        "my_color": my_color,
+        "is_my_turn": is_my_turn, "my_color": my_color,
     }
 
 
-async def _broadcast_state(room_key: str, c: Challenge, state: dict):
+async def _broadcast(room_key: str, msg: dict) -> None:
+    """Send same message to all connections in room."""
     room = _rooms.get(room_key, {})
     dead = []
     for uid, ws in list(room.items()):
-        ok = await _send(ws, {"type": "state", "challenge": _build_state(c, state, uid)})
-        if not ok:
+        if not await _send(ws, msg):
+            dead.append(uid)
+    for uid in dead:
+        room.pop(uid, None)
+
+
+async def _broadcast_state(room_key: str, c: Challenge, state: dict) -> None:
+    """Send per-user state to all connections in room."""
+    room = _rooms.get(room_key, {})
+    dead = []
+    for uid, ws in list(room.items()):
+        if not await _send(ws, {"type": "state", "challenge": _build_state(c, state, uid)}):
             dead.append(uid)
     for uid in dead:
         room.pop(uid, None)
@@ -168,41 +139,30 @@ async def _authenticate(token: str) -> User | None:
     try:
         payload = decode_token(token)
         uid = payload.get("sub")
-        if not uid:
-            return None
-        return await _load_user(uid)
+        return await _load_user(uid) if uid else None
     except JWTError:
         return None
 
 
-# ── WebSocket handler ─────────────────────────────────────────────────────────
+# ── WebSocket ─────────────────────────────────────────────────────────────────
 @router.websocket("/ws/game/{challenge_id}")
 async def game_ws(websocket: WebSocket, challenge_id: str):
     token = websocket.query_params.get("token", "")
-
-    # Auth
     user = await _authenticate(token)
     if not user:
-        await websocket.close(code=4001)
-        return
+        await websocket.close(code=4001); return
 
-    # Load challenge
     challenge = await _load_challenge(challenge_id)
     if not challenge:
-        await websocket.close(code=4004)
-        return
+        await websocket.close(code=4004); return
 
     is_creator = str(challenge.creator_id) == str(user.id)
-    is_opponent = (challenge.opponent_id and
-                   str(challenge.opponent_id) == str(user.id))
-
+    is_opponent = challenge.opponent_id and str(challenge.opponent_id) == str(user.id)
     if not is_creator and not is_opponent:
-        await websocket.close(code=4003)
-        return
+        await websocket.close(code=4003); return
 
     await websocket.accept()
 
-    # Register in room
     room_key = str(challenge_id)
     if room_key not in _rooms:
         _rooms[room_key] = {}
@@ -210,12 +170,9 @@ async def game_ws(websocket: WebSocket, challenge_id: str):
     was_in_room = str(user.id) in _rooms[room_key]
     _rooms[room_key][str(user.id)] = websocket
 
-    # Send current state
+    # Send current state to this connection
     state = json.loads(challenge.game_state) if challenge.game_state else {}
-    await _send(websocket, {
-        "type": "state",
-        "challenge": _build_state(challenge, state, str(user.id)),
-    })
+    await _send(websocket, {"type": "state", "challenge": _build_state(challenge, state, str(user.id))})
 
     # Notify others
     notify_type = "player_reconnected" if (was_in_room or challenge.status == ChallengeStatus.IN_PROGRESS) else "player_joined"
@@ -228,253 +185,192 @@ async def game_ws(websocket: WebSocket, challenge_id: str):
             "challenge": _build_state(challenge, state, uid),
         })
 
-    # ── Message loop ──────────────────────────────────────────────
     try:
         while True:
             raw = await websocket.receive_text()
             try:
                 msg = json.loads(raw)
             except json.JSONDecodeError:
-                await _send(websocket, {"type": "error", "detail": "JSON inválido"})
-                continue
+                await _send(websocket, {"type": "error", "detail": "JSON inválido"}); continue
 
             t = msg.get("type")
 
-            # ── Chat ──────────────────────────────────────────────
-            if t == "chat":
+            # ── Ping ─────────────────────────────────────────────
+            if t == "ping":
+                await _send(websocket, {"type": "pong"})
+
+            # ── Chat ─────────────────────────────────────────────
+            elif t == "chat":
                 text = str(msg.get("text", "")).strip()[:500]
                 if text:
-                    await _broadcast_room(room_key, {
-                        "type": "chat",
-                        "sender": _user_dict(user),
-                        "text": text,
-                        "ts": datetime.now(timezone.utc).isoformat(),
+                    await _broadcast(room_key, {
+                        "type": "chat", "sender": _user_dict(user),
+                        "text": text, "ts": datetime.now(timezone.utc).isoformat(),
                     })
 
             # ── Start ─────────────────────────────────────────────
             elif t == "start":
                 if not is_creator:
-                    await _send(websocket, {"type": "error", "detail": "Só o criador pode iniciar"})
-                    continue
+                    await _send(websocket, {"type": "error", "detail": "Só o criador pode iniciar"}); continue
 
-                # Fresh load from DB
                 c = await _load_challenge(challenge_id)
-                if not c:
-                    await _send(websocket, {"type": "error", "detail": "Desafio não encontrado"})
-                    continue
-
-                if c.status != ChallengeStatus.WAITING:
-                    await _send(websocket, {"type": "error", "detail": "Jogo já iniciado"})
-                    continue
+                if not c or c.status != ChallengeStatus.WAITING:
+                    await _send(websocket, {"type": "error", "detail": "Jogo já iniciado ou não encontrado"}); continue
                 if not c.opponent_id:
-                    await _send(websocket, {"type": "error", "detail": "Aguarda o adversário"})
-                    continue
+                    await _send(websocket, {"type": "error", "detail": "Aguarda o adversário"}); continue
 
-                # Countdown broadcast
                 for i in range(5, 0, -1):
-                    await _broadcast_room(room_key, {"type": "countdown", "seconds": i})
+                    await _broadcast(room_key, {"type": "countdown", "seconds": i})
                     await asyncio.sleep(1)
 
-                # Update status in a fresh session
                 tc = msg.get("time_control")
                 async with AsyncSessionLocal() as db:
                     fresh = await db.get(Challenge, challenge_id)
                     if not fresh or fresh.status != ChallengeStatus.WAITING:
-                        await _send(websocket, {"type": "error", "detail": "Estado inválido"})
-                        continue
+                        await _send(websocket, {"type": "error", "detail": "Estado inválido"}); continue
                     if isinstance(tc, int) and 60 <= tc <= 3600:
                         fresh.time_control = tc
                     fresh.status = ChallengeStatus.IN_PROGRESS
-                    # Mark game_started in state for TTT
                     if fresh.game_type == GameType.TICTACTOE and fresh.game_state:
                         gs = json.loads(fresh.game_state)
                         gs["game_started"] = True
                         fresh.game_state = json.dumps(gs)
                     await db.commit()
 
-                # Reload and broadcast
                 c = await _load_challenge(challenge_id)
-                if not c:
-                    continue
+                if not c: continue
                 state = json.loads(c.game_state) if c.game_state else {}
-                await _broadcast_room(room_key, {"type": "started"})
+                await _broadcast(room_key, {"type": "started"})
                 await _broadcast_state(room_key, c, state)
 
-            # ── Move (Chess ou NTI) ───────────────────────────────
+            # ── Move ─────────────────────────────────────────────
             elif t == "move":
                 c = await _load_challenge(challenge_id)
-                if not c:
-                    await _send(websocket, {"type": "error", "detail": "Desafio não encontrado"})
-                    continue
+                if not c or c.status != ChallengeStatus.IN_PROGRESS:
+                    await _send(websocket, {"type": "error", "detail": "Jogo não está em curso"}); continue
 
-                if c.status != ChallengeStatus.IN_PROGRESS:
-                    await _send(websocket, {"type": "error", "detail": "Jogo não está em curso"})
-                    continue
-
-                # ── TicTacToe move ────────────────────────────────
+                # TicTacToe
                 if c.game_type == GameType.TICTACTOE:
                     uid = str(user.id)
                     state = json.loads(c.game_state)
-                    creator_id = str(c.creator_id)
-                    opp_id = str(c.opponent_id) if c.opponent_id else None
-
-                    my_sym = "X" if uid == creator_id else "O"
+                    my_sym = "X" if uid == str(c.creator_id) else "O"
                     if state.get("current_player") != my_sym:
-                        await _send(websocket, {"type": "error", "detail": "Não é a tua vez"})
-                        continue
-
+                        await _send(websocket, {"type": "error", "detail": "Não é a tua vez"}); continue
                     pos = msg.get("position")
-                    if pos is None or not isinstance(pos, int) or pos < 0 or pos > 8:
-                        await _send(websocket, {"type": "error", "detail": "Posição inválida"})
-                        continue
-
-                    board_state = state.get("board", [None] * 9)
-                    if board_state[pos] is not None:
-                        await _send(websocket, {"type": "error", "detail": "Casa já ocupada"})
-                        continue
-
-                    board_state[pos] = my_sym
-                    state["board"] = board_state
+                    if pos is None or not isinstance(pos, int) or not 0 <= pos <= 8:
+                        await _send(websocket, {"type": "error", "detail": "Posição inválida"}); continue
+                    board_s = state.get("board", [None] * 9)
+                    if board_s[pos] is not None:
+                        await _send(websocket, {"type": "error", "detail": "Casa já ocupada"}); continue
+                    board_s[pos] = my_sym
+                    state["board"] = board_s
                     state["move_count"] = state.get("move_count", 0) + 1
                     state["current_player"] = "O" if my_sym == "X" else "X"
-
-                    # Check winner
                     LINES = [(0,1,2),(3,4,5),(6,7,8),(0,3,6),(1,4,7),(2,5,8),(0,4,8),(2,4,6)]
-                    winner_sym = None
-                    for a, b, c_idx in LINES:
-                        if board_state[a] and board_state[a] == board_state[b] == board_state[c_idx]:
-                            winner_sym = board_state[a]
-                            break
-
-                    is_draw = winner_sym is None and all(cell is not None for cell in board_state)
-                    finished = winner_sym is not None or is_draw
-
-                    if winner_sym:
-                        state["winner"] = winner_sym
-                    elif is_draw:
-                        state["winner"] = "draw"
-
+                    winner_sym = next((board_s[a] for a,b,cc in LINES
+                                       if board_s[a] and board_s[a]==board_s[b]==board_s[cc]), None)
+                    is_draw = not winner_sym and all(cell is not None for cell in board_s)
+                    finished = bool(winner_sym) or is_draw
+                    if winner_sym: state["winner"] = winner_sym
+                    elif is_draw: state["winner"] = "draw"
                     async with AsyncSessionLocal() as db:
                         fresh = await db.get(Challenge, challenge_id)
-                        if not fresh:
-                            continue
+                        if not fresh: continue
                         fresh.game_state = json.dumps(state)
                         if finished:
                             fresh.status = ChallengeStatus.FINISHED
                             if winner_sym:
                                 fresh.finish_reason = "win"
                                 import uuid as _uuid
-                                if winner_sym == "X":
-                                    fresh.winner_id = fresh.creator_id
-                                else:
-                                    fresh.winner_id = fresh.opponent_id
+                                fresh.winner_id = fresh.creator_id if winner_sym == "X" else fresh.opponent_id
                             else:
                                 fresh.finish_reason = "draw"
                         await db.commit()
-
                     c = await _load_challenge(challenge_id)
-                    if not c:
-                        continue
-                    await _broadcast_state(room_key, c, state)
+                    if c: await _broadcast_state(room_key, c, state)
                     continue
 
-                # ── NTI move ──────────────────────────────────────
+                if c.game_type == GameType.CHECKERS:
+                    from app.services.checkers_engine import apply_move as ck_apply, is_game_over as ck_over
+                    uid = str(user.id)
+                    state = json.loads(c.game_state)
+                    my_color = "white" if uid == str(c.creator_id) else "black"
+                    if state.get("winner"):
+                        await _send(websocket, {"type": "error", "detail": "Jogo já terminado"}); continue
+                    if state.get("current_player") != my_color:
+                        await _send(websocket, {"type": "error", "detail": "Não é a tua vez"}); continue
+                    frm = msg.get("from"); to = msg.get("to")
+                    if frm is None or to is None:
+                        await _send(websocket, {"type": "error", "detail": "Falta from/to"}); continue
+                    try:
+                        new_state = ck_apply(state, int(frm), int(to))
+                    except ValueError as e:
+                        await _send(websocket, {"type": "error", "detail": str(e)}); continue
+                    winner = ck_over(new_state)
+                    async with AsyncSessionLocal() as db:
+                        fresh = await db.get(Challenge, challenge_id)
+                        if not fresh: continue
+                        fresh.game_state = json.dumps(new_state)
+                        fresh.current_turn = new_state.get("current_player")
+                        if winner:
+                            fresh.status = ChallengeStatus.FINISHED
+                            fresh.finish_reason = "win"
+                            import uuid as _uuid
+                            fresh.winner_id = fresh.creator_id if winner == "white" else fresh.opponent_id
+                        await db.commit()
+                    c = await _load_challenge(challenge_id)
+                    if c: await _broadcast_state(room_key, c, new_state)
+                    continue
+
+                # NTI
                 if c.game_type == GameType.LUDO:
                     from app.services.nti_engine import apply_move, is_game_over
-
                     uid = str(user.id)
                     state = json.loads(c.game_state)
                     order = state.get("player_order", ["red", "yellow", "blue", "green"])
-
-                    if uid == str(c.creator_id):
-                        my_color = order[0]
-                    elif c.opponent_id and uid == str(c.opponent_id):
-                        my_color = order[1] if len(order) > 1 else "yellow"
-                    else:
-                        await _send(websocket, {"type": "error", "detail": "Não és jogador"})
-                        continue
-
+                    my_color = order[0] if uid == str(c.creator_id) else (order[1] if len(order) > 1 else "yellow")
                     if state.get("current_player") != my_color:
-                        await _send(websocket, {"type": "error", "detail": "Não é a tua vez"})
-                        continue
-
+                        await _send(websocket, {"type": "error", "detail": "Não é a tua vez"}); continue
                     if not state.get("dice"):
-                        await _send(websocket, {"type": "error", "detail": "Lança os dados primeiro"})
-                        continue
-
-                    dice_index = msg.get("dice_index")
-                    token_index = msg.get("token_index")
-
-                    if dice_index is None or token_index is None:
-                        await _send(websocket, {"type": "error", "detail": "Falta dice_index ou token_index"})
-                        continue
-
-                    # Validate move exists
-                    valid_moves = state.get("valid_moves", [])
-                    move_ok = any(
-                        m["dice_index"] == dice_index and m["token_index"] == token_index
-                        for m in valid_moves
-                    )
-                    if not move_ok:
-                        await _send(websocket, {"type": "error", "detail": "Movimento inválido"})
-                        continue
-
-                    new_state = apply_move(state, my_color, dice_index, token_index)
+                        await _send(websocket, {"type": "error", "detail": "Lança os dados primeiro"}); continue
+                    di = msg.get("dice_index"); ti = msg.get("token_index")
+                    if di is None or ti is None:
+                        await _send(websocket, {"type": "error", "detail": "Falta dice_index ou token_index"}); continue
+                    if not any(m["dice_index"] == di and m["token_index"] == ti for m in state.get("valid_moves", [])):
+                        await _send(websocket, {"type": "error", "detail": "Movimento inválido"}); continue
+                    new_state = apply_move(state, my_color, di, ti)
                     winner_color = is_game_over(new_state)
-
                     async with AsyncSessionLocal() as db:
                         fresh = await db.get(Challenge, challenge_id)
-                        if not fresh:
-                            continue
+                        if not fresh: continue
                         fresh.game_state = json.dumps(new_state)
                         fresh.current_turn = new_state.get("current_player")
                         if winner_color:
                             fresh.status = ChallengeStatus.FINISHED
                             fresh.finish_reason = "win"
-                            if order and order[0] == winner_color:
-                                fresh.winner_id = fresh.creator_id
-                            else:
-                                fresh.winner_id = fresh.opponent_id
+                            fresh.winner_id = fresh.creator_id if order and order[0] == winner_color else fresh.opponent_id
                         await db.commit()
-
                     c = await _load_challenge(challenge_id)
-                    if not c:
-                        continue
-                    await _broadcast_state(room_key, c, new_state)
+                    if c: await _broadcast_state(room_key, c, new_state)
                     continue
 
-                # ── Chess move ────────────────────────────────────
+                # Chess
                 uid = str(user.id)
-                if uid == str(c.creator_id):
-                    my_color = c.creator_color
-                elif c.opponent_id and uid == str(c.opponent_id):
-                    my_color = "black" if c.creator_color == "white" else "white"
-                else:
-                    await _send(websocket, {"type": "error", "detail": "Não és jogador"})
-                    continue
-
+                my_color = c.creator_color if uid == str(c.creator_id) else (
+                    "black" if c.creator_color == "white" else "white"
+                )
                 state = json.loads(c.game_state)
                 board = chess.Board(state["fen"])
                 expected = "white" if board.turn == chess.WHITE else "black"
-
                 if my_color != expected:
-                    await _send(websocket, {
-                        "type": "error",
-                        "detail": f"Não é a tua vez (esperado: {expected})",
-                    })
-                    continue
-
+                    await _send(websocket, {"type": "error", "detail": f"Não é a tua vez ({expected})"}); continue
                 uci = str(msg.get("move", "")).strip()
                 try:
                     move = chess.Move.from_uci(uci)
                 except ValueError:
-                    await _send(websocket, {"type": "error", "detail": f"UCI inválido: {uci}"})
-                    continue
-
+                    await _send(websocket, {"type": "error", "detail": f"UCI inválido: {uci}"}); continue
                 if move not in board.legal_moves:
-                    await _send(websocket, {"type": "error", "detail": f"Movimento ilegal: {uci}"})
-                    continue
-
+                    await _send(websocket, {"type": "error", "detail": f"Movimento ilegal: {uci}"}); continue
                 board.push(move)
                 state["fen"] = board.fen()
                 state["moves"].append(uci)
@@ -482,24 +378,14 @@ async def game_ws(websocket: WebSocket, challenge_id: str):
                 state["is_checkmate"] = board.is_checkmate()
                 state["is_stalemate"] = board.is_stalemate()
                 state["is_game_over"] = board.is_game_over()
-
                 new_turn = "black" if board.turn == chess.BLACK else "white"
                 finished = board.is_game_over()
-                winner_id = None
-                finish_reason = None
-                if finished:
-                    if board.is_checkmate():
-                        winner_id = str(user.id)
-                        finish_reason = "checkmate"
-                    elif board.is_stalemate():
-                        finish_reason = "stalemate"
-                    else:
-                        finish_reason = "draw"
-
+                winner_id = str(user.id) if finished and board.is_checkmate() else None
+                finish_reason = ("checkmate" if board.is_checkmate() else
+                                 "stalemate" if board.is_stalemate() else "draw" if finished else None)
                 async with AsyncSessionLocal() as db:
                     fresh = await db.get(Challenge, challenge_id)
-                    if not fresh:
-                        continue
+                    if not fresh: continue
                     fresh.game_state = json.dumps(state)
                     fresh.current_turn = new_turn
                     if finished:
@@ -509,128 +395,79 @@ async def game_ws(websocket: WebSocket, challenge_id: str):
                             import uuid as _uuid
                             fresh.winner_id = _uuid.UUID(winner_id)
                     await db.commit()
-
                 c = await _load_challenge(challenge_id)
-                if not c:
-                    continue
-                await _broadcast_state(room_key, c, state)
+                if c: await _broadcast_state(room_key, c, state)
 
-            # ── Roll dice (NTI only) ───────────────────────────────
+            # ── Roll dice (NTI) ───────────────────────────────────
             elif t == "roll_dice":
                 c = await _load_challenge(challenge_id)
-                if not c or c.status != ChallengeStatus.IN_PROGRESS:
-                    await _send(websocket, {"type": "error", "detail": "Jogo não está em curso"})
-                    continue
-
-                if c.game_type != GameType.LUDO:
-                    await _send(websocket, {"type": "error", "detail": "Só para NTI"})
-                    continue
-
+                if not c or c.status != ChallengeStatus.IN_PROGRESS or c.game_type != GameType.LUDO:
+                    await _send(websocket, {"type": "error", "detail": "Inválido"}); continue
                 from app.services.nti_engine import process_roll, process_bonus_roll
-
                 uid = str(user.id)
                 state = json.loads(c.game_state)
                 order = state.get("player_order", ["red", "yellow", "blue", "green"])
-
-                if uid == str(c.creator_id):
-                    my_color = order[0]
-                elif c.opponent_id and uid == str(c.opponent_id):
-                    my_color = order[1] if len(order) > 1 else "yellow"
-                else:
-                    await _send(websocket, {"type": "error", "detail": "Não és jogador"})
-                    continue
-
+                my_color = order[0] if uid == str(c.creator_id) else (order[1] if len(order) > 1 else "yellow")
                 if state.get("current_player") != my_color:
-                    await _send(websocket, {"type": "error", "detail": "Não é a tua vez"})
-                    continue
-
-                # Bónus: relançar dados específicos
-                bonus_dice = state.get("bonus_dice", [])
-                if bonus_dice:
-                    new_state, new_vals = process_bonus_roll(state, my_color, bonus_dice)
+                    await _send(websocket, {"type": "error", "detail": "Não é a tua vez"}); continue
+                bonus = state.get("bonus_dice", [])
+                if bonus:
+                    new_state, _ = process_bonus_roll(state, my_color, bonus)
                 elif state.get("dice") is None:
-                    new_state, new_vals = process_roll(state, my_color)
+                    new_state, _ = process_roll(state, my_color)
                 else:
-                    await _send(websocket, {"type": "error", "detail": "Dados já lançados"})
-                    continue
-
+                    await _send(websocket, {"type": "error", "detail": "Dados já lançados"}); continue
                 async with AsyncSessionLocal() as db:
                     fresh = await db.get(Challenge, challenge_id)
-                    if not fresh:
-                        continue
+                    if not fresh: continue
                     fresh.game_state = json.dumps(new_state)
                     fresh.current_turn = new_state.get("current_player")
                     await db.commit()
-
                 c = await _load_challenge(challenge_id)
-                if not c:
-                    continue
-                await _broadcast_state(room_key, c, new_state)
+                if c: await _broadcast_state(room_key, c, new_state)
 
             # ── Resign ────────────────────────────────────────────
             elif t == "resign":
                 c = await _load_challenge(challenge_id)
-                if not c or c.status != ChallengeStatus.IN_PROGRESS:
-                    continue
-
+                if not c or c.status != ChallengeStatus.IN_PROGRESS: continue
                 uid = str(user.id)
                 async with AsyncSessionLocal() as db:
                     fresh = await db.get(Challenge, challenge_id)
-                    if not fresh:
-                        continue
-                    if uid == str(fresh.creator_id):
-                        fresh.winner_id = fresh.opponent_id
-                    else:
-                        fresh.winner_id = fresh.creator_id
+                    if not fresh: continue
+                    fresh.winner_id = fresh.opponent_id if uid == str(fresh.creator_id) else fresh.creator_id
                     fresh.status = ChallengeStatus.FINISHED
                     fresh.finish_reason = "resign"
                     await db.commit()
-
                 c = await _load_challenge(challenge_id)
-                if not c:
-                    continue
-                state = json.loads(c.game_state) if c.game_state else {}
-                await _broadcast_state(room_key, c, state)
+                if c:
+                    state = json.loads(c.game_state) if c.game_state else {}
+                    await _broadcast_state(room_key, c, state)
 
     except WebSocketDisconnect:
         pass
-
     finally:
         room = _rooms.get(room_key, {})
         room.pop(str(user.id), None)
 
-        # Disconnect penalty only during active game
         c = await _load_challenge(challenge_id)
         if c and c.status == ChallengeStatus.IN_PROGRESS:
             await asyncio.sleep(3)
-
-            if str(user.id) in _rooms.get(room_key, {}):
-                return  # reconnected
-
-            await _broadcast_room(room_key, {
+            if str(user.id) in _rooms.get(room_key, {}): return
+            await _broadcast(room_key, {
                 "type": "player_disconnected",
                 "player_id": str(user.id),
                 "player_name": user.full_name,
                 "timeout_seconds": 30,
             })
-
             await asyncio.sleep(27)
-
-            if str(user.id) in _rooms.get(room_key, {}):
-                return  # reconnected during countdown
-
-            # Forfeit
+            if str(user.id) in _rooms.get(room_key, {}): return
             async with AsyncSessionLocal() as db:
                 fresh = await db.get(Challenge, challenge_id)
                 if fresh and fresh.status == ChallengeStatus.IN_PROGRESS:
-                    if str(fresh.creator_id) == str(user.id):
-                        fresh.winner_id = fresh.opponent_id
-                    else:
-                        fresh.winner_id = fresh.creator_id
+                    fresh.winner_id = fresh.opponent_id if str(fresh.creator_id) == str(user.id) else fresh.creator_id
                     fresh.status = ChallengeStatus.FINISHED
                     fresh.finish_reason = "disconnect"
                     await db.commit()
-
             c = await _load_challenge(challenge_id)
             if c:
                 state = json.loads(c.game_state) if c.game_state else {}

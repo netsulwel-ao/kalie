@@ -1,8 +1,9 @@
 /**
- * Jogo da Velha (Tic-Tac-Toe) — multiplayer em tempo real via WebSocket.
- * Arquitectura idêntica ao ChessPage — backend é fonte de verdade.
+ * Damas — multiplayer em tempo real via WebSocket.
+ * Arquitectura idêntica ao ChessPage. Backend é fonte de verdade.
+ * Regras angolanas: peças movem para a frente; só voltam atrás para capturar.
  */
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Copy, Check, Share2, Send,
@@ -17,38 +18,83 @@ import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Player { id: string; username: string; full_name: string; avatar_url: string | null; }
-interface TTTState {
-  board: (string | null)[];
-  current_player: string;
+interface CheckersState {
+  board: Record<string, string>;
+  current_player: "white" | "black";
+  selected: number | null;
+  must_capture: boolean;
   winner: string | null;
-  game_started: boolean;
   move_count: number;
+  captured_white: number;
+  captured_black: number;
 }
 interface ChallengeData {
   id: string; game_type: string; status: string; invite_code: string;
   time_control: number;
-  game_state: TTTState | null;
+  game_state: CheckersState | null;
   winner_id: string | null; finish_reason: string | null;
   creator: Player | null; opponent: Player | null;
-  is_my_turn: boolean; my_color: string | null;
+  is_my_turn: boolean; my_color: "white" | "black" | null;
 }
 interface ChatMsg { sender: Player; text: string; ts: string; }
+interface LegalMove { from: number; to: number; over: number | null; }
 
-const WINNING_LINES = [
-  [0,1,2],[3,4,5],[6,7,8],
-  [0,3,6],[1,4,7],[2,5,8],
-  [0,4,8],[2,4,6],
-];
+function row(pos: number) { return Math.floor(pos / 8); }
+function col(pos: number) { return pos % 8; }
 
-function getWinLine(board: (string | null)[]): number[] | null {
-  for (const line of WINNING_LINES) {
-    const [a, b, c] = line;
-    if (board[a] && board[a] === board[b] && board[a] === board[c]) return line;
-  }
-  return null;
+// ── Board Square ──────────────────────────────────────────────────────────────
+function Square({
+  pos: _pos, piece, isDark, isSelected, isLegalDest, isLegalSrc, isChainPiece,
+  myColor: _myColor, onClick,
+}: {
+  pos: number; piece: string | null; isDark: boolean;
+  isSelected: boolean; isLegalDest: boolean; isLegalSrc: boolean; isChainPiece: boolean;
+  myColor: "white" | "black" | null; onClick: () => void;
+}) {
+  const isWhite = piece?.startsWith("w");
+  const isBlack = piece?.startsWith("b");
+  const isKing  = piece?.endsWith("k");
+  const canInteract = isSelected || isLegalDest || isLegalSrc || isChainPiece;
+
+  return (
+    <div
+      onClick={onClick}
+      className={cn(
+        "relative flex items-center justify-center transition-all",
+        isDark ? "bg-[#5d4037]" : "bg-[#d7ccc8]",
+        isSelected && "ring-2 ring-inset ring-yellow-400",
+        isLegalDest && isDark && "ring-2 ring-inset ring-green-400/80",
+        canInteract && "cursor-pointer",
+      )}
+      style={{ aspectRatio: "1" }}
+    >
+      {isLegalDest && !piece && (
+        <div className="w-[34%] h-[34%] rounded-full bg-green-400/60 pointer-events-none" />
+      )}
+      {isLegalDest && piece && (
+        <div className="absolute inset-0 ring-2 ring-inset ring-green-400/80 pointer-events-none" />
+      )}
+      {piece && (
+        <div className={cn(
+          "w-[76%] h-[76%] rounded-full flex items-center justify-center",
+          "shadow-[0_3px_8px_rgba(0,0,0,0.5)] border-2 transition-transform",
+          isWhite ? "bg-gradient-to-br from-white to-zinc-200 border-zinc-400"    : "",
+          isBlack ? "bg-gradient-to-br from-zinc-700 to-zinc-950 border-zinc-500" : "",
+          isSelected && "scale-110",
+          isLegalSrc && !isSelected && "ring-2 ring-yellow-300/70",
+          isChainPiece && "ring-4 ring-yellow-400 animate-pulse",
+        )}>
+          {isKing && (
+            <Crown className={cn("w-[50%] h-[50%]", isWhite ? "text-accent-gold" : "text-yellow-400")} />
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
-export default function TicTacToePage() {
+// ── Page ──────────────────────────────────────────────────────────────────────
+export default function CheckersPage() {
   const { challengeId } = useParams<{ challengeId: string }>();
   const navigate = useNavigate();
   const { user } = useAuthStore();
@@ -58,6 +104,10 @@ export default function TicTacToePage() {
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [selectedTime, setSelectedTime] = useState(300);
+
+  // Board interaction
+  const [selected, setSelected] = useState<number | null>(null);
+  const [legalMoves, setLegalMoves] = useState<LegalMove[]>([]);
 
   // Chat
   const [chatOpen, setChatOpen] = useState(false);
@@ -76,26 +126,17 @@ export default function TicTacToePage() {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
 
-  // Derived
   const isInProgress = challenge?.status === "in_progress";
-  const gs = challenge?.game_state;
-  const board = gs?.board ?? Array(9).fill(null);
-  const winLine = gs?.board ? getWinLine(gs.board) : null;
-  const isCreator = !!(user?.id && challenge?.creator?.id && String(user.id) === String(challenge.creator.id));
-  const opponent = isCreator ? challenge?.opponent : challenge?.creator;
-  const mySymbol = challenge?.my_color ?? "X";
-  const isWaiting = challenge?.status === "waiting";
-  const isFinished = challenge?.status === "finished";
-  const isDraw = challenge?.finish_reason === "draw" || gs?.winner === "draw";
+  const isWaiting    = challenge?.status === "waiting";
+  const isFinished   = challenge?.status === "finished";
+  const isCreator    = !!(user?.id && challenge?.creator?.id && String(user.id) === String(challenge.creator.id));
+  const opponent     = isCreator ? challenge?.opponent : challenge?.creator;
+  const myColor      = challenge?.my_color ?? null;
+  const gs           = challenge?.game_state ?? null;
 
-  // Block navigation during game
   useEffect(() => {
     if (!isInProgress) return;
-    const handler = (e: BeforeUnloadEvent) => {
-      e.preventDefault();
-      e.returnValue = "Tens uma partida em curso.";
-      return e.returnValue;
-    };
+    const handler = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; return ""; };
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
   }, [isInProgress]);
@@ -103,26 +144,22 @@ export default function TicTacToePage() {
   // Initial fetch
   useEffect(() => {
     api.get(`/games/challenges/${challengeId}`)
-      .then(({ data }) => {
-        setChallenge(data);
-        if (data.time_control) setSelectedTime(data.time_control);
-      })
+      .then(({ data }) => { setChallenge(data); if (data.time_control) setSelectedTime(data.time_control); })
       .catch((e) => setError(extractApiError(e)))
       .finally(() => setLoading(false));
   }, [challengeId]);
 
-  // Poll for opponent while waiting (fallback for WS race conditions)
+  // Poll for opponent
   useEffect(() => {
     if (challenge?.status !== "waiting" || challenge?.opponent) return;
-    const interval = setInterval(() => {
+    const iv = setInterval(() => {
       api.get(`/games/challenges/${challengeId}`)
         .then(({ data }) => { if (data.opponent) setChallenge(data); })
         .catch(() => {});
     }, 3000);
-    return () => clearInterval(interval);
+    return () => clearInterval(iv);
   }, [challenge?.status, challenge?.opponent, challengeId]);
 
-  // WebSocket — exact same pattern as ChessPage
   const chatOpenRef = useRef(chatOpen);
   useEffect(() => { chatOpenRef.current = chatOpen; }, [chatOpen]);
 
@@ -139,8 +176,10 @@ export default function TicTacToePage() {
         if (msg.type === "state") {
           setChallenge(msg.challenge);
           setCountdown(null);
+          setSelected(null);
+          setLegalMoves([]);
         } else if (msg.type === "chat") {
-          setChatMsgs((prev) => [...prev, msg]);
+          setChatMsgs((p) => [...p, msg]);
           if (!chatOpenRef.current) setUnreadChat((n) => n + 1);
           setTimeout(() => chatBottomRef.current?.scrollIntoView({ behavior: "smooth" }), 50);
         } else if (msg.type === "countdown") {
@@ -148,11 +187,8 @@ export default function TicTacToePage() {
         } else if (msg.type === "started") {
           setCountdown(null);
         } else if (msg.type === "player_joined" || msg.type === "player_reconnected") {
-          if (msg.challenge) {
-            setChallenge(msg.challenge);
-          } else {
-            api.get(`/games/challenges/${challengeId}`).then(({ data }) => setChallenge(data));
-          }
+          if (msg.challenge) setChallenge(msg.challenge);
+          else api.get(`/games/challenges/${challengeId}`).then(({ data }) => setChallenge(data));
           if (msg.type === "player_reconnected") {
             if (disconnectTimerRef.current) clearInterval(disconnectTimerRef.current);
             setDisconnected(null);
@@ -171,9 +207,9 @@ export default function TicTacToePage() {
             }, 1000);
           }
         } else if (msg.type === "error") {
-          console.warn("[TTT WS error]", msg.detail);
+          console.warn("[Checkers WS]", msg.detail);
         }
-      } catch { /* ignore parse errors */ }
+      } catch { /* ignore */ }
     };
 
     ws.onclose = () => {
@@ -192,18 +228,12 @@ export default function TicTacToePage() {
     };
   }, [connectWS]);
 
-  // Actions — same pattern as ChessPage
   function sendWS(msg: object) {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(msg));
-    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(JSON.stringify(msg));
   }
 
-  function handleStart() { sendWS({ type: "start", time_control: selectedTime }); }
-  function handleResign() {
-    if (!confirm("Tens a certeza que queres desistir?")) return;
-    sendWS({ type: "resign" });
-  }
+  function handleStart()  { sendWS({ type: "start", time_control: selectedTime }); }
+  function handleResign() { if (!confirm("Tens a certeza que queres desistir?")) return; sendWS({ type: "resign" }); }
   function sendChat(e: React.FormEvent) {
     e.preventDefault();
     if (!chatInput.trim()) return;
@@ -211,20 +241,182 @@ export default function TicTacToePage() {
     setChatInput("");
   }
   function copyInviteLink() {
-    navigator.clipboard.writeText(`${window.location.origin}/jogos/tictactoe/${challengeId}`);
+    navigator.clipboard.writeText(`${window.location.origin}/jogos/damas/${challengeId}`);
     setCopied(true); setTimeout(() => setCopied(false), 2000);
   }
   function shareWhatsApp() {
-    const url = `${window.location.origin}/jogos/tictactoe/${challengeId}`;
-    window.open(`https://wa.me/?text=${encodeURIComponent(`Desafio-te para Jogo da Velha no Kalie! Entra aqui: ${url}`)}`);
+    const url = `${window.location.origin}/jogos/damas/${challengeId}`;
+    window.open(`https://wa.me/?text=${encodeURIComponent(`Desafio-te para Damas no Kalie! Entra aqui: ${url}`)}`);
   }
-  function handleCellClick(idx: number) {
-    if (!challenge?.is_my_turn) return;
-    if (board[idx]) return;
-    if (gs?.winner) return;
-    if (challenge.status !== "in_progress") return;
-    sendWS({ type: "move", position: idx });
+
+  // ── Legal move computation (client-side for highlights) ───────────────────
+  const clientLegalMoves = useMemo((): LegalMove[] => {
+    if (!gs || !myColor || !challenge?.is_my_turn) return [];
+    const board = gs.board;
+    const player = myColor;
+
+    function isOwn(p: string) { return p.startsWith(player === "white" ? "w" : "b"); }
+    function isEnemy(p: string) { return p.startsWith(player === "white" ? "b" : "w"); }
+    function inB(r: number, c: number) { return r >= 0 && r <= 7 && c >= 0 && c <= 7; }
+    // Forward: white moves up (row-), red moves down (row+)
+    const fwdDirs = player === "white" ? [[-1,-1],[-1,1]] : [[1,-1],[1,1]];
+
+    function getCaptures(pos: number): LegalMove[] {
+      const piece = board[String(pos)];
+      if (!piece) return [];
+      const isKing = piece.endsWith("k");
+      const dirs = [[-1,-1],[-1,1],[1,-1],[1,1]];
+      const caps: LegalMove[] = [];
+
+      if (isKing) {
+        for (const [dr, dc] of dirs) {
+          let r = row(pos) + dr, c = col(pos) + dc;
+          while (inB(r, c)) {
+            const mid = r * 8 + c;
+            const mp = board[String(mid)];
+            if (mp) {
+              if (isEnemy(mp)) {
+                let r2 = r + dr, c2 = c + dc;
+                while (inB(r2, c2)) {
+                  const dest = r2 * 8 + c2;
+                  if (!board[String(dest)]) caps.push({ from: pos, over: mid, to: dest });
+                  else break;
+                  r2 += dr; c2 += dc;
+                }
+              }
+              break;
+            }
+            r += dr; c += dc;
+          }
+        }
+      } else {
+        for (const [dr, dc] of dirs) {
+          const r2 = row(pos) + dr, c2 = col(pos) + dc;
+          if (!inB(r2, c2)) continue;
+          const mid = r2 * 8 + c2;
+          const mp = board[String(mid)];
+          if (!mp || !isEnemy(mp)) continue;
+          const r3 = r2 + dr, c3 = c2 + dc;
+          if (inB(r3, c3) && !board[String(r3 * 8 + c3)])
+            caps.push({ from: pos, over: mid, to: r3 * 8 + c3 });
+        }
+      }
+      return caps;
+    }
+
+    function getMoves(pos: number): LegalMove[] {
+      const piece = board[String(pos)];
+      if (!piece) return [];
+      const isKing = piece.endsWith("k");
+      // Use outer fwdDirs (white=up, red=down)
+      const moves: LegalMove[] = [];
+
+      if (isKing) {
+        for (const [dr, dc] of [[-1,-1],[-1,1],[1,-1],[1,1]]) {
+          let r = row(pos) + dr, c = col(pos) + dc;
+          while (inB(r, c)) {
+            const dest = r * 8 + c;
+            if (board[String(dest)]) break;
+            moves.push({ from: pos, to: dest, over: null });
+            r += dr; c += dc;
+          }
+        }
+      } else {
+        for (const [dr, dc] of fwdDirs) {
+          const r2 = row(pos) + dr, c2 = col(pos) + dc;
+          if (inB(r2, c2) && !board[String(r2 * 8 + c2)])
+            moves.push({ from: pos, to: r2 * 8 + c2, over: null });
+        }
+      }
+      return moves;
+    }
+
+    // Chain capture: only from selected piece
+    const chainPos = gs.selected;
+    if (chainPos !== null && chainPos !== undefined) {
+      return getCaptures(chainPos);
+    }
+
+    // All captures (mandatory)
+    const allCaps: LegalMove[] = [];
+    for (const [ps, piece] of Object.entries(board)) {
+      if (isOwn(piece)) allCaps.push(...getCaptures(parseInt(ps)));
+    }
+    if (allCaps.length > 0) return allCaps;
+
+    // Simple moves
+    const allMoves: LegalMove[] = [];
+    for (const [ps, piece] of Object.entries(board)) {
+      if (isOwn(piece)) allMoves.push(...getMoves(parseInt(ps)));
+    }
+    return allMoves;
+  }, [gs, myColor, challenge?.is_my_turn]);
+
+  // ── Square click ──────────────────────────────────────────────────────────
+  function handleSquareClick(pos: number) {
+    if (!challenge?.is_my_turn || !isInProgress || gs?.winner) return;
+
+    const piece = gs?.board[String(pos)];
+    const isOwn = piece && myColor && piece.startsWith(myColor === "white" ? "w" : "b");
+    const chainPos = gs?.selected;
+
+    // During chain capture, can only click legal destinations from chain piece
+    if (chainPos !== null && chainPos !== undefined) {
+      const dest = clientLegalMoves.find(m => m.from === chainPos && m.to === pos);
+      if (dest) {
+        sendWS({ type: "move", from: chainPos, to: pos });
+        setSelected(null);
+        setLegalMoves([]);
+      }
+      return;
+    }
+
+    // Select own piece
+    if (isOwn) {
+      const movesFromHere = clientLegalMoves.filter(m => m.from === pos);
+      if (movesFromHere.length > 0) {
+        setSelected(pos);
+        setLegalMoves(movesFromHere);
+      } else {
+        setSelected(null);
+        setLegalMoves([]);
+      }
+      return;
+    }
+
+    // Click on destination
+    if (selected !== null) {
+      const dest = legalMoves.find(m => m.from === selected && m.to === pos);
+      if (dest) {
+        sendWS({ type: "move", from: selected, to: pos });
+        setSelected(null);
+        setLegalMoves([]);
+      } else {
+        setSelected(null);
+        setLegalMoves([]);
+      }
+    }
   }
+
+  // ── Board rendering ───────────────────────────────────────────────────────
+  const legalDests = useMemo(() => new Set(legalMoves.map(m => m.to)), [legalMoves]);
+  const legalSrcs  = useMemo(() => {
+    if (selected) return new Set<number>();
+    return new Set(clientLegalMoves.map(m => m.from));
+  }, [clientLegalMoves, selected]);
+  const chainPiece = gs?.selected ?? null;
+
+  // white sees their pieces at bottom: display rows 7→0 (row 7 at top of screen = far, row 0 at bottom = near)
+  // Actually: we want row 7 at BOTTOM of screen for white (their pieces are in rows 5-7)
+  // So white: display rows from top=[0,1,2,...7] bottom — NO, white needs rows [0..7] with 7 at bottom
+  // Simplest: white = normal board (row 0 at top, row 7 at bottom) → white pieces (rows 5-7) appear at bottom ✓
+  // black = flipped (row 7 at top, row 0 at bottom) → black pieces (rows 0-2) appear at bottom ✓
+  const displayRows = myColor === "black"
+    ? [7,6,5,4,3,2,1,0]   // black: flipped, their pieces (rows 0-2) at bottom
+    : [0,1,2,3,4,5,6,7];  // white: normal, their pieces (rows 5-7) at bottom
+  const displayCols = myColor === "black"
+    ? [7,6,5,4,3,2,1,0]
+    : [0,1,2,3,4,5,6,7];
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[60vh]">
@@ -241,15 +433,13 @@ export default function TicTacToePage() {
   return (
     <div className="py-6 max-w-5xl mx-auto">
 
-      {/* Countdown overlay */}
+      {/* Countdown */}
       {countdown !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm">
           <div className="text-center">
             <p className="text-themed-muted text-body-lg mb-4">O jogo começa em</p>
-            <div className="text-[120px] font-black font-space-grotesk text-accent-games leading-none"
-              style={{ textShadow: "0 0 60px rgba(191,90,242,0.5)" }}>
-              {countdown}
-            </div>
+            <div className="text-[120px] font-black font-space-grotesk text-accent-gold leading-none"
+              style={{ textShadow: "0 0 60px rgba(200,150,0,0.6)" }}>{countdown}</div>
           </div>
         </div>
       )}
@@ -273,13 +463,13 @@ export default function TicTacToePage() {
           className="glass-panel p-2 rounded-xl text-themed-muted hover:text-themed-primary border border-white/10 transition-all">
           <ArrowLeft className="w-5 h-5" />
         </button>
-        <h1 className="text-h2 font-space-grotesk text-themed-primary">Jogo da Velha</h1>
+        <h1 className="text-h2 font-space-grotesk text-themed-primary">Damas</h1>
         <span className="text-label-caps text-themed-muted bg-white/5 px-3 py-1 rounded-full border border-white/10 font-mono">
           #{challenge?.invite_code}
         </span>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto">
           <button onClick={() => { setChatOpen(v => !v); setUnreadChat(0); }}
-            className="relative glass-panel px-3 py-2 rounded-xl text-themed-muted hover:text-themed-primary transition-all border border-white/10">
+            className="relative glass-panel px-3 py-2 rounded-xl text-themed-muted hover:text-themed-primary border border-white/10">
             <MessageCircle className="w-5 h-5" />
             {unreadChat > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 bg-accent-sos text-white text-[10px] font-bold rounded-full flex items-center justify-center">
@@ -292,7 +482,7 @@ export default function TicTacToePage() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
 
-        {/* Board + controls */}
+        {/* Board */}
         <div className="lg:col-span-8 flex flex-col gap-4">
 
           {/* Opponent */}
@@ -305,10 +495,15 @@ export default function TicTacToePage() {
                 </Avatar>
                 <div className="flex-1 min-w-0">
                   <p className="text-body-sm font-bold text-themed-primary truncate">{opponent.full_name}</p>
-                  <p className="text-xs text-themed-muted">Adversário — {mySymbol === "X" ? "○ O" : "✕ X"}</p>
+                  <p className="text-xs text-themed-muted">
+                    Adversário —
+                    <span className={cn("ml-1 font-bold", myColor === "white" ? "text-zinc-400" : "text-zinc-200")}>
+                      {myColor === "white" ? "⬛ Preto" : "⬜ Branco"}
+                    </span>
+                  </p>
                 </div>
-                {!challenge?.is_my_turn && isInProgress && (
-                  <div className="flex items-center gap-1.5 text-accent-games text-xs">
+                {!challenge?.is_my_turn && isInProgress && gs && !gs.winner && (
+                  <div className="flex items-center gap-1.5 text-accent-gold text-xs">
                     <Loader2 className="w-3.5 h-3.5 animate-spin" /> A jogar...
                   </div>
                 )}
@@ -323,50 +518,68 @@ export default function TicTacToePage() {
             )}
           </div>
 
-          {/* TTT Board */}
-          <div className="glass-panel luminous-edge rounded-2xl p-6 flex items-center justify-center" style={{ minHeight: 340 }}>
-            <div className="w-full max-w-xs">
-              <div className="grid grid-cols-3 gap-3">
-                {board.map((cell, idx) => {
-                  const isWinCell = winLine?.includes(idx) ?? false;
-                  const canClick = challenge?.is_my_turn && !cell && isInProgress && !gs?.winner;
-                  return (
-                    <button
-                      key={idx}
-                      onClick={() => handleCellClick(idx)}
-                      disabled={!canClick}
-                      className={cn(
-                        "aspect-square rounded-2xl flex items-center justify-center text-6xl font-black transition-all duration-150 border-2",
-                        isWinCell
-                          ? "bg-accent-games/20 border-accent-games/60 shadow-[0_0_24px_rgba(191,90,242,0.5)]"
-                          : "glass-panel border-white/10",
-                        canClick && "hover:bg-white/10 hover:border-white/30 cursor-pointer active:scale-95",
-                        !canClick && "cursor-default",
-                      )}
-                    >
-                      {cell === "X" && (
-                        <span className={cn("select-none", isWinCell ? "text-accent-games" : "text-accent-sos")}>✕</span>
-                      )}
-                      {cell === "O" && (
-                        <span className={cn("select-none", isWinCell ? "text-accent-games" : "text-accent-bisno")}>○</span>
-                      )}
-                    </button>
-                  );
-                })}
+          {/* Checkers Board */}
+          <div className="glass-panel luminous-edge rounded-2xl p-3 border border-accent-gold/20">
+            {/* Captured pieces */}
+            <div className="flex justify-between items-center px-2 pb-2">
+              <div className="flex items-center gap-1">
+                {Array.from({ length: gs?.captured_white ?? 0 }).map((_, i) => (
+                  <div key={i} className="w-4 h-4 rounded-full bg-gradient-to-br from-white to-zinc-200 border border-zinc-400" />
+                ))}
               </div>
+              <div className="flex items-center gap-1">
+                {Array.from({ length: gs?.captured_black ?? 0 }).map((_, i) => (
+                  <div key={i} className="w-4 h-4 rounded-full bg-gradient-to-br from-zinc-700 to-zinc-950 border border-zinc-500" />
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-8 border-2 border-zinc-700 rounded-xl overflow-hidden shadow-2xl">
+              {displayRows.flatMap(r =>
+                displayCols.map(c => {
+                  const pos = r * 8 + c;
+                  const isDark = (r + c) % 2 === 1;
+                  const piece = gs?.board[String(pos)] ?? null;
+                  const isSel = selected === pos;
+                  const isLDest = legalDests.has(pos);
+                  const isLSrc  = legalSrcs.has(pos);
+                  const isChain = chainPiece === pos;
+                  return (
+                    <Square
+                      key={pos}
+                      pos={pos}
+                      piece={piece}
+                      isDark={isDark}
+                      isSelected={isSel}
+                      isLegalDest={isLDest}
+                      isLegalSrc={isLSrc}
+                      isChainPiece={isChain}
+                      myColor={myColor}
+                      onClick={() => isDark ? handleSquareClick(pos) : undefined}
+                    />
+                  );
+                })
+              )}
+            </div>
+
+            {/* Coordinates */}
+            <div className="flex justify-between px-2 pt-1">
+              {displayCols.map(c => (
+                <div key={c} className="flex-1 text-center text-[9px] text-themed-muted font-mono">
+                  {String.fromCharCode(65 + c)}
+                </div>
+              ))}
             </div>
           </div>
 
           {/* Result */}
           {isFinished && (
             <div className={cn("glass-panel luminous-edge rounded-xl p-5 text-center border",
-              isDraw ? "border-accent-gold/30" :
               challenge?.winner_id === user?.id ? "border-accent-feed/30" : "border-accent-sos/30")}>
               <Crown className={cn("w-10 h-10 mx-auto mb-2",
-                isDraw ? "text-accent-gold" :
                 challenge?.winner_id === user?.id ? "text-accent-gold" : "text-zinc-600")} />
               <p className="text-h3 font-space-grotesk text-themed-primary mb-1">
-                {isDraw ? "Empate!" : challenge?.winner_id === user?.id ? "Vitória!" : "Derrota"}
+                {challenge?.winner_id === user?.id ? "Vitória!" : "Derrota"}
               </p>
               <p className="text-themed-muted text-body-sm capitalize mb-4">{challenge?.finish_reason}</p>
               <Button className="w-full" onClick={() => navigate("/jogos")}>
@@ -376,13 +589,21 @@ export default function TicTacToePage() {
           )}
 
           {/* Turn indicator */}
-          {isInProgress && !isFinished && !gs?.winner && (
-            <div className={cn("glass-panel rounded-xl px-4 py-3 text-center border transition-all",
+          {isInProgress && gs && !gs.winner && (
+            <div className={cn("glass-panel rounded-xl px-4 py-3 text-center border",
               challenge?.is_my_turn ? "border-accent-feed/30 bg-accent-feed/5" : "border-white/5")}>
-              <p className={cn("text-body-sm font-bold",
-                challenge?.is_my_turn ? "text-accent-feed" : "text-themed-muted")}>
-                {challenge?.is_my_turn ? `A tua vez — joga ${mySymbol === "X" ? "✕" : "○"}` : "Vez do adversário..."}
-              </p>
+              {gs.selected !== null && gs.selected !== undefined ? (
+                <p className="text-accent-gold font-bold text-body-sm">
+                  Captura em cadeia! Continua a capturar.
+                </p>
+              ) : (
+                <p className={cn("text-body-sm font-bold",
+                  challenge?.is_my_turn ? "text-accent-feed" : "text-themed-muted")}>
+                  {challenge?.is_my_turn
+                    ? `A tua vez ${gs.must_capture ? "— captura obrigatória!" : ""}`
+                    : "Vez do adversário..."}
+                </p>
+              )}
             </div>
           )}
 
@@ -390,7 +611,7 @@ export default function TicTacToePage() {
           <div className="glass-panel rounded-xl px-4 py-3 flex items-center gap-3">
             <Avatar className="w-9 h-9 flex-shrink-0">
               <AvatarImage src={user?.avatar_url ?? undefined} />
-              <AvatarFallback className="bg-accent-games/20 text-accent-games text-sm">
+              <AvatarFallback className="bg-accent-gold/20 text-accent-gold text-sm">
                 {user?.full_name?.charAt(0)}
               </AvatarFallback>
             </Avatar>
@@ -398,8 +619,8 @@ export default function TicTacToePage() {
               <p className="text-body-sm font-bold text-themed-primary truncate">
                 {user?.full_name} <span className="text-themed-muted font-normal">(Tu)</span>
               </p>
-              <p className="text-xs font-bold text-accent-games">
-                {mySymbol === "X" ? "✕ X" : "○ O"}
+              <p className={cn("text-xs font-bold", myColor === "white" ? "text-zinc-200" : "text-zinc-400")}>
+                {myColor === "white" ? "⬜ Branco" : "⬛ Preto"}
               </p>
             </div>
             {isInProgress && (
@@ -430,7 +651,7 @@ export default function TicTacToePage() {
                       <button key={secs} onClick={() => setSelectedTime(secs)}
                         className={cn("py-2 rounded-xl text-xs font-bold border transition-all",
                           selectedTime === secs
-                            ? "bg-accent-games/15 border-accent-games/40 text-accent-games"
+                            ? "bg-accent-gold/15 border-accent-gold/40 text-accent-gold"
                             : "glass-panel border-white/5 text-themed-muted hover:border-white/15")}>
                         {label}
                       </button>
@@ -479,41 +700,35 @@ export default function TicTacToePage() {
               )}
 
               {isCreator && challenge?.opponent && (
-                <Button className="w-full bg-accent-games text-white hover:brightness-110" onClick={handleStart}>
+                <Button className="w-full bg-accent-gold text-zinc-950 hover:brightness-110" onClick={handleStart}>
                   Iniciar Partida
                 </Button>
               )}
             </div>
           )}
 
-          {/* Score + move count */}
+          {/* Stats */}
           {(isInProgress || isFinished) && (
             <div className="glass-panel luminous-edge rounded-xl p-5">
-              <h3 className="text-body-md font-bold text-themed-primary mb-4">Pontuação</h3>
-              <div className="flex items-center justify-around mb-3">
-                <div className="text-center">
-                  <p className="text-5xl font-black text-accent-sos">✕</p>
-                  <p className="text-xs text-themed-muted mt-1">
-                    {isCreator ? "Tu" : opponent?.full_name?.split(" ")[0]}
-                  </p>
+              <h3 className="text-body-md font-bold text-themed-primary mb-4">Peças capturadas</h3>
+              <div className="flex justify-between items-center mb-3">
+                <div>
+                  <p className="text-xs text-themed-muted mb-1">Brancas capturadas</p>
+                  <p className="text-2xl font-black text-zinc-200">{gs?.captured_white ?? 0}</p>
                 </div>
-                <p className="text-themed-muted text-xl font-bold">vs</p>
-                <div className="text-center">
-                  <p className="text-5xl font-black text-accent-bisno">○</p>
-                  <p className="text-xs text-themed-muted mt-1">
-                    {!isCreator ? "Tu" : opponent?.full_name?.split(" ")[0]}
-                  </p>
+                <div className="text-themed-muted">vs</div>
+                <div className="text-right">
+                  <p className="text-xs text-themed-muted mb-1">Pretas capturadas</p>
+                  <p className="text-2xl font-black text-zinc-400">{gs?.captured_black ?? 0}</p>
                 </div>
               </div>
-              <p className="text-xs text-themed-muted text-center">
-                Movimentos: {gs?.move_count ?? 0}
-              </p>
+              <p className="text-xs text-themed-muted text-center">Movimentos: {gs?.move_count ?? 0}</p>
             </div>
           )}
 
           {/* Chat */}
           {chatOpen && (
-            <div className="glass-panel luminous-edge rounded-xl overflow-hidden flex flex-col" style={{ height: 320 }}>
+            <div className="glass-panel luminous-edge rounded-xl overflow-hidden flex flex-col" style={{ height: 300 }}>
               <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between">
                 <h4 className="text-body-sm font-bold text-themed-primary">Chat</h4>
                 <button onClick={() => setChatOpen(false)} className="text-themed-muted hover:text-themed-primary">
@@ -528,7 +743,7 @@ export default function TicTacToePage() {
                       <AvatarFallback className="text-[10px] bg-white/10">{m.sender.full_name.charAt(0)}</AvatarFallback>
                     </Avatar>
                     <div className={cn("px-3 py-1.5 rounded-xl text-xs max-w-[75%]",
-                      m.sender.id === user?.id ? "bg-accent-games/20 text-themed-primary" : "glass-panel text-themed-secondary")}>
+                      m.sender.id === user?.id ? "bg-accent-gold/20 text-themed-primary" : "glass-panel text-themed-secondary")}>
                       {m.text}
                     </div>
                   </div>
@@ -540,7 +755,7 @@ export default function TicTacToePage() {
               </div>
               <form onSubmit={sendChat} className="p-3 border-t border-white/5 flex gap-2">
                 <input value={chatInput} onChange={e => setChatInput(e.target.value)}
-                  className="flex-1 glass-panel border border-white/10 rounded-xl px-3 py-2 text-xs text-themed-primary outline-none focus:border-accent-games/50"
+                  className="flex-1 glass-panel border border-white/10 rounded-xl px-3 py-2 text-xs text-themed-primary outline-none focus:border-accent-gold/50"
                   placeholder="Escreve uma mensagem..." />
                 <button type="submit"
                   className="glass-panel p-2 rounded-xl text-themed-muted hover:text-themed-primary border border-white/10">

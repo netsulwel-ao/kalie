@@ -17,6 +17,7 @@ class GameType(str, Enum):
     CHESS      = "chess"
     LUDO       = "ludo"
     TICTACTOE  = "tictactoe"
+    CHECKERS   = "checkers"
 
 
 class ChallengeStatus(str, Enum):

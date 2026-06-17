@@ -65,6 +65,11 @@ def _challenge_to_dict(c: Challenge, current_user_id: str) -> dict:
             my_color = "X"
         elif opp_id and uid == opp_id:
             my_color = "O"
+    elif c.game_type == GameType.CHECKERS:
+        if uid == creator_id:
+            my_color = "white"
+        elif opp_id and uid == opp_id:
+            my_color = "black"
 
     is_my_turn = False
     if c.game_type == GameType.CHESS and state and c.status == ChallengeStatus.IN_PROGRESS:
@@ -82,6 +87,13 @@ def _challenge_to_dict(c: Challenge, current_user_id: str) -> dict:
         is_my_turn = (
             state.get("current_player") == my_color and
             state.get("winner") is None
+        )
+    elif c.game_type == GameType.CHECKERS and state and c.status == ChallengeStatus.IN_PROGRESS:
+        sel = state.get("selected")
+        is_my_turn = (
+            state.get("current_player") == my_color and
+            state.get("winner") is None and
+            (sel is None or True)  # during chain capture, same player continues
         )
 
     return {
@@ -173,11 +185,14 @@ async def create_challenge(data: CreateChallengeRequest, db: DB, current_user: V
     elif data.game_type == GameType.TICTACTOE:
         initial_state = json.dumps({
             "board": [None] * 9,
-            "current_player": "X",  # X always starts (creator = X)
+            "current_player": "X",
             "winner": None,
             "move_count": 0,
             "game_started": False,
         })
+    elif data.game_type == GameType.CHECKERS:
+        from app.services.checkers_engine import initial_state as checkers_initial
+        initial_state = json.dumps(checkers_initial())
 
     challenge = Challenge(
         game_type=data.game_type,
@@ -353,8 +368,6 @@ async def join_challenge(challenge_id: uuid.UUID, db: DB, current_user: Verified
 
     # Return fresh dict using already-refreshed challenge
     return _challenge_to_dict(challenge, opp_id)
-
-    return result
 
 
 @router.post("/challenges/{challenge_id}/move")

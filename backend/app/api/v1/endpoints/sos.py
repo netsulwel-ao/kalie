@@ -102,12 +102,15 @@ async def create_alert(
 @router.get("/alerts", response_model=list[AlertOut])
 async def list_alerts(
     status: str = Query("active"),
+    user_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(SOSAlert).order_by(SOSAlert.created_at.desc()).limit(limit)
     if status != "all":
         q = q.where(SOSAlert.status == status)
+    if user_id:
+        q = q.where(SOSAlert.user_id == uuid.UUID(user_id))
     result = await db.execute(q)
     return [_alert_out(a) for a in result.scalars().all()]
 
@@ -260,12 +263,14 @@ async def create_campaign(
 
 @router.get("/campaigns", response_model=list[CampaignOut])
 async def list_campaigns(
+    creator_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Campaign).where(Campaign.is_active == True).order_by(Campaign.created_at.desc()).limit(limit)
-    )
+    q = select(Campaign).where(Campaign.is_active == True).order_by(Campaign.created_at.desc()).limit(limit)
+    if creator_id:
+        q = q.where(Campaign.creator_id == uuid.UUID(creator_id))
+    result = await db.execute(q)
     return [_campaign_out(c) for c in result.scalars().all()]
 
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Outlet } from "react-router-dom";
+import { Outlet, useNavigate } from "react-router-dom";
 import TopBar from "./TopBar";
 import SideNav from "./SideNav";
 import BottomNav from "./BottomNav";
@@ -25,6 +25,7 @@ export function useSideNav() {
 
 export default function AppLayout() {
   const [expanded, setExpanded] = useState(false);
+  const navigate = useNavigate();
 
   return (
     <SideNavContext.Provider value={{ expanded, setExpanded }}>
@@ -46,7 +47,7 @@ export default function AppLayout() {
         </main>
 
         <BottomNav />
-        <SOSButton />
+        <SOSButton onClick={() => navigate("/sos")} />
       </div>
     </SideNavContext.Provider>
   );

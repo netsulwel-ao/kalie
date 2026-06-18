@@ -15,6 +15,7 @@ from app.models.user import User
 from app.services.user_service import UserService
 
 bearer_scheme = HTTPBearer()
+optional_bearer = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
@@ -62,6 +63,30 @@ async def get_current_user(
     return user
 
 
+async def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer),
+    db: Annotated[AsyncSession, Depends(get_db)] = None,  # type: ignore
+) -> User | None:
+    """Like get_current_user, but returns None instead of 401 if unauthenticated."""
+    if not credentials:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+        user_id: str = payload.get("sub")
+        if user_id is None or payload.get("type") != "access":
+            return None
+        jti: str = payload.get("jti", "")
+        if jti and await is_token_blacklisted(jti):
+            return None
+        user_service = UserService(db)
+        user = await user_service.get_by_id(user_id)
+        if user and user.is_active:
+            return user
+    except Exception:
+        return None
+    return None
+
+
 async def get_current_verified_user(
     current_user: Annotated[User, Depends(get_current_user)],
 ) -> User:
@@ -76,5 +101,6 @@ async def get_current_verified_user(
 
 # Type aliases for cleaner route signatures
 CurrentUser = Annotated[User, Depends(get_current_user)]
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
 VerifiedUser = Annotated[User, Depends(get_current_verified_user)]
 DB = Annotated[AsyncSession, Depends(get_db)]

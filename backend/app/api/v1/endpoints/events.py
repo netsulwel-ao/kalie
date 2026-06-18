@@ -3,15 +3,16 @@ Events (Mapa/Explorar) endpoints.
 """
 import math
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.core.deps import get_current_user, get_db
-from app.models.event import Event, EventCategory, EventStatus
+from app.core.deps import get_current_user, get_db, OptionalUser
+from app.models.event import Event, EventAttendee, EventCategory, EventStatus
 from app.models.user import User
 from app.services.cloudinary_service import upload_image
 
@@ -37,6 +38,16 @@ class EventOut(BaseModel):
     ends_at: datetime | None
     created_at: datetime
     distance_km: float | None = None
+    is_attending: bool = False
+
+
+class AttendeeOut(BaseModel):
+    id: str
+    user_id: str
+    full_name: str | None = None
+    username: str | None = None
+    avatar_url: str | None = None
+    created_at: datetime
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -50,7 +61,7 @@ def _haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def _event_out(e: Event, user_lat: float | None = None, user_lon: float | None = None) -> EventOut:
+def _event_out(e: Event, user_lat: float | None = None, user_lon: float | None = None, is_attending: bool = False) -> EventOut:
     dist = None
     if user_lat and user_lon and e.latitude and e.longitude:
         dist = round(_haversine(user_lat, user_lon, e.latitude, e.longitude), 2)
@@ -61,7 +72,7 @@ def _event_out(e: Event, user_lat: float | None = None, user_lon: float | None =
         location_name=e.location_name, latitude=e.latitude, longitude=e.longitude,
         max_attendees=e.max_attendees, attendees_count=e.attendees_count,
         starts_at=e.starts_at, ends_at=e.ends_at, created_at=e.created_at,
-        distance_km=dist,
+        distance_km=dist, is_attending=is_attending,
     )
 
 
@@ -78,9 +89,14 @@ async def list_events(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
+    now = datetime.now(timezone.utc)
     q = select(Event).order_by(Event.created_at.desc()).limit(limit).offset(offset)
     if status != "all":
         q = q.where(Event.status == status)
+    if status in ("active", "all"):
+        q = q.where(
+            Event.ends_at.is_(None) | (Event.ends_at > now)
+        )
     if category:
         q = q.where(Event.category == category)
     result = await db.execute(q)
@@ -135,12 +151,27 @@ async def create_event(
 
 
 @router.get("/{event_id}", response_model=EventOut)
-async def get_event(event_id: str, db: AsyncSession = Depends(get_db)):
+async def get_event(
+    event_id: str,
+    current_user: OptionalUser,
+    db: AsyncSession = Depends(get_db),
+):
     result = await db.execute(select(Event).where(Event.id == uuid.UUID(event_id)))
     event = result.scalar_one_or_none()
     if not event:
         raise HTTPException(status_code=404, detail="Evento não encontrado.")
-    return _event_out(event)
+
+    is_attending = False
+    if current_user:
+        att = await db.execute(
+            select(EventAttendee).where(
+                EventAttendee.event_id == event.id,
+                EventAttendee.user_id == current_user.id,
+            )
+        )
+        is_attending = att.scalar_one_or_none() is not None
+
+    return _event_out(event, is_attending=is_attending)
 
 
 @router.post("/{event_id}/attend")
@@ -155,9 +186,78 @@ async def attend_event(
         raise HTTPException(status_code=404, detail="Evento não encontrado.")
     if event.max_attendees and event.attendees_count >= event.max_attendees:
         raise HTTPException(status_code=400, detail="Evento lotado.")
+
+    existing = await db.execute(
+        select(EventAttendee).where(
+            EventAttendee.event_id == event.id,
+            EventAttendee.user_id == current_user.id,
+        )
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Já confirmaste presença.")
+
+    attendee = EventAttendee(event_id=event.id, user_id=current_user.id)
+    db.add(attendee)
     event.attendees_count += 1
     await db.commit()
     return {"message": "Presença confirmada.", "attendees_count": event.attendees_count}
+
+
+@router.delete("/{event_id}/attend")
+async def unattend_event(
+    event_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(Event).where(Event.id == uuid.UUID(event_id)))
+    event = result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento não encontrado.")
+
+    existing = await db.execute(
+        select(EventAttendee).where(
+            EventAttendee.event_id == event.id,
+            EventAttendee.user_id == current_user.id,
+        )
+    )
+    att = existing.scalar_one_or_none()
+    if not att:
+        raise HTTPException(status_code=404, detail="Não confirmaste presença.")
+
+    await db.delete(att)
+    if event.attendees_count > 0:
+        event.attendees_count -= 1
+    await db.commit()
+    return {"message": "Presença removida.", "attendees_count": event.attendees_count}
+
+
+@router.get("/{event_id}/attendees", response_model=list[AttendeeOut])
+async def list_attendees(
+    event_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(Event).options(selectinload(Event.attendees).selectinload(EventAttendee.user))
+        .where(Event.id == uuid.UUID(event_id))
+    )
+    event = result.scalar_one_or_none()
+    if not event:
+        raise HTTPException(status_code=404, detail="Evento não encontrado.")
+    if str(event.creator_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Só o criador pode ver os participantes.")
+
+    return [
+        AttendeeOut(
+            id=str(a.id),
+            user_id=str(a.user_id),
+            full_name=a.user.full_name if a.user else None,
+            username=a.user.username if a.user else None,
+            avatar_url=a.user.avatar_url if a.user else None,
+            created_at=a.created_at,
+        )
+        for a in event.attendees
+    ]
 
 
 @router.delete("/{event_id}")

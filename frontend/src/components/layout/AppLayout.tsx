@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { Outlet, useNavigate } from "react-router-dom";
+import { Outlet } from "react-router-dom";
 import TopBar from "./TopBar";
 import SideNav from "./SideNav";
 import BottomNav from "./BottomNav";
 import SOSButton from "@/components/ui/SOSButton";
+import SOSQuickModal from "@/components/ui/SOSQuickModal";
 import { cn } from "@/lib/utils";
 
 // Contexto leve — partilha o estado expanded entre SideNav e AppLayout
@@ -25,7 +26,6 @@ export function useSideNav() {
 
 export default function AppLayout() {
   const [expanded, setExpanded] = useState(false);
-  const navigate = useNavigate();
 
   return (
     <SideNavContext.Provider value={{ expanded, setExpanded }}>
@@ -47,7 +47,8 @@ export default function AppLayout() {
         </main>
 
         <BottomNav />
-        <SOSButton onClick={() => navigate("/sos")} />
+        <SOSButton />
+        <SOSQuickModal />
       </div>
     </SideNavContext.Provider>
   );

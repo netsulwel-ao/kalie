@@ -4,7 +4,7 @@ SOS endpoints — alerts, missing persons, lost & found, campaigns.
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,6 +131,22 @@ async def resolve_alert(
     alert.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     return {"message": "Alerta resolvido."}
+
+
+@router.delete("/alerts/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alert(
+    alert_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(SOSAlert).where(SOSAlert.id == uuid.UUID(alert_id)))
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerta não encontrado.")
+    if str(alert.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    await db.delete(alert)
+    await db.commit()
 
 
 # ── Missing Persons ───────────────────────────────────────────────────────────

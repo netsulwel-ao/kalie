@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import MapPicker from "@/components/ui/MapPicker";
 import {
   sosApi, timeAgo,
   type SOSAlert, type MissingPerson, type LostFound, type Campaign,
@@ -76,9 +77,12 @@ export default function SOSPage() {
   const [showCampaignDetails, setShowCampaignDetails] = useState(false);
   const [selectedCampaign,   setSelectedCampaign]    = useState<Campaign | null>(null);
   const [alertsFilter, setAlertsFilter] = useState<string>("active");
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [showMapPicker, setShowMapPicker] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
-  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval>>();
+  const pendingCategoryRef = useRef<string>("");
 
   const [campaignTab,        setCampaignTab]         = useState<"all" | "mine">("all");
   const [showCampaignModal,  setShowCampaignModal]   = useState(false);
@@ -122,13 +126,12 @@ export default function SOSPage() {
   useEffect(() => { loadTab(activeTab); }, [activeTab, missingFilter, campaignTab, alertsFilter]);
 
   function startCountdown(category: string) {
+    pendingCategoryRef.current = category;
     setCountdown(5);
     countdownRef.current = setInterval(() => {
       setCountdown(prev => {
         if (prev === null || prev <= 1) {
           clearInterval(countdownRef.current);
-          setCountdown(null);
-          executeSendAlert(category);
           return null;
         }
         return prev - 1;
@@ -136,13 +139,32 @@ export default function SOSPage() {
     }, 1000);
   }
 
+  useEffect(() => {
+    if (countdown !== null || !pendingCategoryRef.current) return;
+    executeSendAlert(pendingCategoryRef.current);
+    pendingCategoryRef.current = "";
+  }, [countdown]);
+
   async function executeSendAlert(category: string) {
     setSubmitting(true); setError("");
+    try {
+      if ("geolocation" in navigator) {
+        const pos = await new Promise<GeolocationPosition>((resolve) =>
+          navigator.geolocation.getCurrentPosition(resolve, () => {}, { enableHighAccuracy: true, timeout: 8000 }),
+        );
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) });
+      }
+    } catch {}
     try {
       const fd = new FormData();
       fd.append("category", category);
       if (alertForm.description) fd.append("description", alertForm.description);
-      if (alertForm.location_name) fd.append("location_name", alertForm.location_name);
+      let locationName = alertForm.location_name;
+      if (!locationName && coords) {
+        const name = await reverseGeocode(coords.lat, coords.lng);
+        if (name) locationName = name;
+      }
+      if (locationName) fd.append("location_name", locationName);
       if (coords) {
         fd.append("latitude", String(coords.lat));
         fd.append("longitude", String(coords.lng));
@@ -158,14 +180,42 @@ export default function SOSPage() {
   function getLocation() {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => {}, // silent fail
+        (pos) => setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) }),
+        () => {},
+        { enableHighAccuracy: true, timeout: 8000 },
       );
     }
   }
 
+  async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=pt`,
+        { headers: { "User-Agent": "Kalie/1.0" } },
+      );
+      const data = await res.json();
+      return data.display_name || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function deleteAlert(id: string) {
+    setSubmitting(true);
+    try {
+      await sosApi.alerts.delete(id);
+      const idToRemove = id;
+      setDeleteConfirm(null);
+      setAlerts(prev => prev.filter(a => a.id !== idToRemove));
+    } catch (e) { setError(extractApiError(e)); }
+    finally { setSubmitting(false); }
+  }
+
   function shareAlert(alert: SOSAlert) {
-    const text = `🚨 Alerta SOS - ${alert.category.replace("_", " ")}${alert.location_name ? ` em ${alert.location_name}` : ""}${alert.description ? `: ${alert.description}` : ""}`;
+    let text = `🚨 Alerta SOS - ${alert.category.replace("_", " ")}`;
+    if (alert.location_name) text += ` em ${alert.location_name}`;
+    if (alert.latitude && alert.longitude) text += `\n📍 https://www.google.com/maps?q=${alert.latitude},${alert.longitude}`;
+    if (alert.description) text += `: ${alert.description}`;
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, "_blank");
   }
@@ -356,25 +406,48 @@ export default function SOSPage() {
             )}
             {alerts.map((alert, i) => (
               <div key={alert.id} className={cn(
-                "flex items-center gap-4 px-5 py-4 transition-colors hover:bg-white/3",
+                "flex items-start gap-4 px-5 py-4 transition-colors hover:bg-white/3",
                 i < alerts.length - 1 && "border-b border-white/5",
               )}>
-                <AlertTriangle className={cn("w-5 h-5 flex-shrink-0",
+                <AlertTriangle className={cn("w-5 h-5 flex-shrink-0 mt-0.5",
                   alert.status === "active" ? "text-accent-sos" : "text-zinc-600")} />
                 <div className="flex-1 min-w-0">
                   <p className="text-body-sm font-semibold text-themed-primary capitalize">{alert.category.replace("_", " ")}</p>
                   {alert.description && <p className="text-xs text-themed-muted mt-0.5">{alert.description}</p>}
                   {alert.location_name && (
                     <p className="text-xs text-themed-muted flex items-center gap-1 mt-0.5">
-                      <MapPin className="w-3 h-3" /> {alert.location_name}
+                      <MapPin className="w-3 h-3 flex-shrink-0" /> <span className="truncate">{alert.location_name}</span>
                     </p>
+                  )}
+                  {alert.latitude && alert.longitude && (
+                    <div className="flex items-center gap-2 mt-1 flex-wrap">
+                      <span className="text-[10px] text-themed-muted">
+                        {alert.latitude.toFixed(5)}, {alert.longitude.toFixed(5)}
+                      </span>
+                      <a
+                        href={`https://www.google.com/maps?q=${alert.latitude},${alert.longitude}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[10px] text-accent-feed hover:underline flex items-center gap-0.5"
+                      >
+                        <MapPin className="w-2.5 h-2.5" /> Ver no mapa
+                      </a>
+                    </div>
                   )}
                 </div>
                 <div className="flex flex-col items-end gap-1 flex-shrink-0">
-                  <button onClick={() => shareAlert(alert)}
-                    className="text-themed-muted hover:text-accent-feed transition-colors mb-1">
-                    <Share2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1 mb-1">
+                    {alert.user_id === user?.id && (
+                      <button onClick={() => setDeleteConfirm(alert.id)}
+                        className="text-themed-muted hover:text-accent-sos transition-colors">
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                    <button onClick={() => shareAlert(alert)}
+                      className="text-themed-muted hover:text-accent-feed transition-colors">
+                      <Share2 className="w-4 h-4" />
+                    </button>
+                  </div>
                   <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full",
                     alert.status === "active" ? "text-accent-sos bg-accent-sos/10" : "text-accent-feed bg-accent-feed/10")}>
                     {alert.status === "active" ? "Activo" : "Resolvido"}
@@ -705,6 +778,28 @@ export default function SOSPage() {
         </div>
       )}
 
+      {/* ── Modal Confirmar Eliminação ──────────────────────────── */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+          <div className="glass-panel rounded-2xl p-6 w-full max-w-sm border border-accent-sos/30">
+            <div className="text-center">
+              <div className="w-14 h-14 rounded-full bg-accent-sos/10 flex items-center justify-center mx-auto mb-4 border border-accent-sos/20">
+                <AlertTriangle className="w-7 h-7 text-accent-sos" />
+              </div>
+              <h3 className="text-h3 font-space-grotesk text-themed-primary mb-2">Eliminar alerta?</h3>
+              <p className="text-body-sm text-accent-sos mb-6 font-bold">Isto é irreversível!</p>
+              <div className="flex gap-3">
+                <Button variant="glass" className="flex-1" onClick={() => setDeleteConfirm(null)}>Cancelar</Button>
+                <Button className="flex-1 bg-accent-sos text-white hover:brightness-110"
+                  onClick={() => deleteAlert(deleteConfirm)} disabled={submitting}>
+                  {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : "Sim, eliminar"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Modal Alerta ─────────────────────────────────────── */}
       {showAlertModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
@@ -714,9 +809,25 @@ export default function SOSPage() {
               <button onClick={() => { setShowAlertModal(false); setCountdown(null); clearInterval(countdownRef.current); }}><X className="w-5 h-5 text-themed-muted" /></button>
             </div>
             {coords && (
-              <p className="text-xs text-accent-feed mb-3 flex items-center gap-1">
-                <MapPin className="w-3 h-3" /> Localização detectada automaticamente
-              </p>
+              <div className="mb-3">
+                <p className="text-xs text-accent-feed flex items-center gap-1">
+                  <MapPin className="w-3 h-3" />
+                  Localização detectada{coords.accuracy ? ` (±${coords.accuracy}m)` : ""}
+                </p>
+                <button onClick={() => setShowMapPicker(!showMapPicker)}
+                  className="text-[11px] text-accent-feed hover:underline mt-1">
+                  {showMapPicker ? "Fechar mapa" : "Ajustar no mapa"}
+                </button>
+                {showMapPicker && (
+                  <div className="mt-2">
+                    <MapPicker
+                      lat={coords.lat}
+                      lng={coords.lng}
+                      onLocationChange={(lat, lng) => setCoords(prev => prev ? { ...prev, lat, lng } : { lat, lng })}
+                    />
+                  </div>
+                )}
+              </div>
             )}
             <div className="grid grid-cols-2 gap-2 mb-4">
               {emergencyCategories.map(({ icon: Icon, label, value, color, bg }) => (

@@ -217,6 +217,7 @@ export const sosApi = {
     create: (form: FormData) =>
       api.post<SOSAlert>("/sos/alerts", form, { headers: { "Content-Type": "multipart/form-data" } }).then(r => r.data),
     resolve: (id: string) => api.patch(`/sos/alerts/${id}/resolve`).then(r => r.data),
+    delete: (id: string) => api.delete(`/sos/alerts/${id}`),
   },
   missing: {
     list: (status = "active") => api.get<MissingPerson[]>(`/sos/missing?status=${status}`).then(r => r.data),

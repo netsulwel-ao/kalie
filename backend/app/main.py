@@ -1,6 +1,8 @@
 """
 Kalie — FastAPI Entry Point
 """
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -12,20 +14,38 @@ from slowapi.middleware import SlowAPIMiddleware
 from slowapi.util import get_remote_address
 
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import AsyncSessionLocal, engine, Base
 from app.api.v1.router import api_router
 from app.core.middleware import SecurityHeadersMiddleware
 from app.api.v1.endpoints.games_ws import router as game_ws_router
 from app.api.v1.endpoints.squid_ws import router as squid_ws_router
 
 
+async def _periodic_housekeeping():
+    """Run every 30s: auto-finalize expired auctions, auto-refund outbidded."""
+    logger = logging.getLogger("kalie.housekeeping")
+    while True:
+        await asyncio.sleep(30)
+        try:
+            async with AsyncSessionLocal() as db:
+                from app.services.auction_service import auto_finalize_expired, auto_refund_outbidded
+                fin = await auto_finalize_expired(db)
+                ref = await auto_refund_outbidded(db)
+                await db.commit()
+                if fin or ref:
+                    logger.info("Housekeeping: %d finalized, %d refunded", fin, ref)
+        except Exception as exc:
+            logger.warning("Housekeeping error: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
-    # Create tables (Alembic handles migrations in prod)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+    task = asyncio.create_task(_periodic_housekeeping())
     yield
+    task.cancel()
     await engine.dispose()
 
 

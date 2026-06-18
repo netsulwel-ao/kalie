@@ -3,7 +3,7 @@ FastAPI dependencies — injected into route handlers.
 """
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -60,6 +60,24 @@ async def get_current_user(
         )
 
     return user
+
+
+async def get_optional_current_user(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    authorization: str | None = Header(None),
+) -> User | None:
+    """Return User if valid Bearer token present, None otherwise. Never raises."""
+    if not authorization:
+        return None
+    try:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return None
+        from fastapi.security.http import HTTPAuthorizationCredentials
+        creds = HTTPAuthorizationCredentials(scheme=scheme, credentials=token)
+        return await get_current_user(creds, db)
+    except HTTPException:
+        return None
 
 
 async def get_current_verified_user(

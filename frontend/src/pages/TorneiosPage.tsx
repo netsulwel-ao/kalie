@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import {
-  Trophy, Users, Clock, Swords, Crown,
+  Trophy, Users, Swords, Crown,
   ChevronRight, Plus, Lock, Gamepad2, Shield,
 } from "lucide-react";
 import { cn } from "@/lib/utils";

@@ -152,7 +152,7 @@ export default function SideNav() {
 
         {/* ── Toggle expand/collapse ────────────────────────── */}
         <button
-          onClick={() => setExpanded((v) => !v)}
+          onClick={() => setExpanded(!expanded)}
           title={expanded ? "Colapsar menu" : "Expandir menu"}
           className={cn(
             "flex items-center gap-3 px-3 py-3 rounded-xl w-full",

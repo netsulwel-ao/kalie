@@ -43,6 +43,7 @@ type EventForm = z.infer<typeof eventSchema>;
 
 const LUANDA: [number, number] = [-8.839, 13.289];
 const LOC_HTML = `<div style="width:22px;height:22px;background:#BF5AF2;border:3px solid #fff;border-radius:50%;box-shadow:0 0 0 4px rgba(191,90,242,.3)"></div>`;
+const PIN_SVG = `<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline;margin-right:2px"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`;
 
 // ── Contact helpers ──────────────────────────────────────────────────────────────
 
@@ -305,7 +306,7 @@ export default function MapaPage() {
   }
 
   async function load(geoPos?: [number, number]) {
-    setLoading(true);
+    setLoading(true); setError("");
     try {
       const pos = geoPos ?? userPos;
       const cat = filterCategoryMap[activeFilter];
@@ -327,7 +328,7 @@ export default function MapaPage() {
 
       const [eventData, bisnoData] = await Promise.all(promises);
       setEvents([...eventData, ...bisnoData.map(bisnoToEvent)]);
-    } catch (e) { setError(extractApiError(e)); }
+    } catch (e) { setError(extractApiError(e)); setEvents([]); }
     finally { setLoading(false); }
   }
 
@@ -410,8 +411,8 @@ export default function MapaPage() {
           <div style="font-family:sans-serif;min-width:160px">
             <b style="font-size:13px">${ev.title}</b>
             <p style="font-size:11px;color:#555;margin:4px 0">${ev.description}</p>
-            ${ev.location_name ? `<p style="font-size:11px;color:#888">📍 ${ev.location_name}</p>` : ""}
-            ${ev.distance_km ? `<p style="font-size:11px;color:#888">📏 ${ev.distance_km} km</p>` : ""}
+            ${ev.location_name ? `<p style="font-size:11px;color:#888">${PIN_SVG} ${ev.location_name}</p>` : ""}
+            ${ev.distance_km ? `<p style="font-size:11px;color:#888">${PIN_SVG} ${ev.distance_km} km</p>` : ""}
           </div>
         `)
         .addTo(markers.current!);
@@ -451,6 +452,21 @@ export default function MapaPage() {
     if (locDot.current) { locDot.current.remove(); locDot.current = null; }
   }
 
+  async function reverseGeocode(lat: number, lng: number) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=pt`,
+        { headers: { "User-Agent": "KalieApp/1.0" } },
+      );
+      const data = await res.json();
+      const addr = data?.address;
+      const province = addr?.state || "";
+      const municipality = addr?.municipality || addr?.city || addr?.town || addr?.village || "";
+      const parts = [province, municipality].filter(Boolean);
+      if (parts.length) f.setValue("location_name", parts.join(", "));
+    } catch { /* silencia */ }
+  }
+
   function useGps() {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
@@ -462,6 +478,7 @@ export default function MapaPage() {
           icon: L.divIcon({ className: "", html: LOC_HTML, iconSize: [22, 22], iconAnchor: [11, 11] }),
         }).addTo(map.current!);
         map.current?.setView([lat, lng], 15);
+        reverseGeocode(lat, lng);
       },
       () => { setError("Não foi possível obter localização."); },
       { enableHighAccuracy: true, timeout: 10000 },
@@ -477,8 +494,8 @@ export default function MapaPage() {
         <div style="font-family:sans-serif;min-width:200px">
           <b style="font-size:13px">${ev.title}</b>
           <p style="font-size:11px;color:#555;margin:4px 0">${ev.description}</p>
-          ${ev.location_name ? `<p style="font-size:11px;color:#888">📍 ${ev.location_name}</p>` : ""}
-          ${ev.distance_km ? `<p style="font-size:11px;color:#888">📏 ${ev.distance_km} km</p>` : ""}
+          ${ev.location_name ? `<p style="font-size:11px;color:#888">${PIN_SVG} ${ev.location_name}</p>` : ""}
+          ${ev.distance_km ? `<p style="font-size:11px;color:#888">${PIN_SVG} ${ev.distance_km} km</p>` : ""}
           <button onclick="window.dispatchEvent(new CustomEvent('open-event-detail', {detail: '${ev.id}'}))" 
             style="margin-top:8px;padding:6px 12px;background:#BF5AF2;color:white;border:none;border-radius:4px;cursor:pointer;font-size:11px;width:100%">
             Ver Detalhes
@@ -853,13 +870,14 @@ export default function MapaPage() {
                         <span className={cn("flex-1 flex items-center justify-center gap-1.5 glass-panel border rounded-xl px-3 py-2 text-xs transition-colors",
                           selLat !== null ? "border-accent-games/50 text-accent-games bg-accent-games/10" : "border-white/10 text-themed-secondary")}>
                           <MapPin className="w-3.5 h-3.5" />
-                          {selLat !== null ? "Definida ✓" : "Clica no mapa"}
+                          {selLat !== null ? "Definida" : "Clica no mapa"}
                         </span>
                       </div>
 
                       {selLat !== null && (
-                        <p className="text-[10px] text-themed-muted">
-                          📍 {selLat.toFixed(4)}, {selLng?.toFixed(4)}
+                        <p className="text-[10px] text-themed-muted flex items-center gap-1">
+                          <MapPin className="w-3 h-3" />
+                          {selLat.toFixed(4)}, {selLng?.toFixed(4)}
                         </p>
                       )}
                     </div>

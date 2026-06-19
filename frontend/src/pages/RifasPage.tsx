@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import {
   Ticket, Clock, Users, ShieldCheck, Star,
-  Lock, CheckCircle, Plus, X, Loader2, Upload, Image,
+  Lock, CheckCircle, Plus, X, Loader2, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";

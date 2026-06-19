@@ -6,7 +6,6 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { ArrowLeft, Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import api from "@/services/api";
 import { useAuthStore } from "@/stores/authStore";
 import { cn } from "@/lib/utils";
 
@@ -132,7 +131,6 @@ export default function SquidGamePage() {
   const myIdRef = useRef("");
   const pressedRef = useRef(false);
   const posRef = useRef({ x: 0.5, y: 0.88 });
-  const animRef = useRef(0);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
   const lightRef = useRef<"green"|"red">("green");
@@ -297,7 +295,6 @@ export default function SquidGamePage() {
     const c = canvasRef.current; if (!c) return;
     const r = c.getBoundingClientRect();
     const cx = "touches" in e ? e.touches[0].clientX - r.left : e.clientX - r.left;
-    const cy = "touches" in e ? e.touches[0].clientY - r.top  : e.clientY - r.top;
     posRef.current.x = Math.max(0.02, Math.min(0.98, cx / c.width));
   }
 

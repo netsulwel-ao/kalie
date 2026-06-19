@@ -9,7 +9,7 @@ import {
   Truck, Monitor, Package, Home, Send, Inbox,
   Navigation, Loader2, X, Image, ChevronRight,
   Phone, MessageCircle, PhoneCall, Wrench,
-  Tag, ChevronLeft, Search,
+  Tag, ChevronLeft, Search, Clock, Check,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,7 @@ import { extractApiError } from "@/services/api";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type Tab = "disponiveis" | "meus" | "publicar";
-type FormStep = "type" | "common" | "specific";
+type FormStep = "type" | "common" | "specific" | "submit";
 
 const categoryLabels = [
   "Todas", "Tecnologia", "Entregas", "Transporte",
@@ -129,72 +129,69 @@ function DetailSidePanel({ item, onClose, onEdit, onDelete, onStatus }: {
 
   return (
     <>
-      {/* Side panel */}
-      <div className={cn("fixed right-0 top-24 z-50 bottom-0 w-full max-w-lg glass-panel border-l border-white/10 overflow-y-auto transition-transform duration-300 shadow-2xl",
+      {/* Side panel — same style as map detail panel */}
+      <div className={cn("fixed right-0 top-[280px] h-[calc(420px+6cm)] w-full max-w-sm bg-black border-l border-white/10 overflow-y-auto transition-transform duration-300 shadow-2xl z-50",
         isOpen ? "translate-x-0" : "translate-x-full")}>
         {/* Header */}
-        <div className="sticky top-0 z-10 glass-panel border-b border-white/5 p-5 flex items-center justify-between">
-          <h3 className="text-h3 font-space-grotesk text-themed-primary">Detalhes</h3>
-          <button onClick={onClose} className="w-8 h-8 glass-panel rounded-full flex items-center justify-center hover:bg-white/10 transition-colors">
-            <X className="w-4 h-4 text-themed-muted" />
+        <div className="sticky top-0 z-10 bg-zinc-900/90 backdrop-blur-md border-b border-zinc-800 px-4 py-3 flex items-center justify-between">
+          <h3 className="text-h3 font-space-grotesk text-white">Detalhes</h3>
+          <button onClick={onClose} className="w-8 h-8 bg-zinc-800 rounded-full flex items-center justify-center hover:bg-zinc-700 transition-colors">
+            <X className="w-4 h-4 text-zinc-400" />
           </button>
         </div>
 
-        <div className="p-5 space-y-6">
+        <div className="px-4 pb-4 space-y-4 pt-[3cm]">
           {/* Image gallery */}
           {images.length > 0 && (
-            <div className="relative h-64 bg-black/40">
+            <div className="relative h-48 bg-black/40 rounded-xl overflow-hidden">
               <img src={images[imgIdx]} alt="" className="w-full h-full object-cover" />
               {images.length > 1 && (
                 <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
                   {images.map((_, i) => (
                     <button key={i} onClick={() => setImgIdx(i)}
-                      className={cn("w-2 h-2 rounded-full transition-all", i === imgIdx ? "bg-white w-4" : "bg-white/40")} />
+                      className={cn("w-2 h-2 rounded-full transition-all", i === imgIdx ? "bg-white w-4" : "bg-white/40 hover:bg-white/60")} />
                   ))}
                 </div>
               )}
             </div>
           )}
 
-          {/* Title */}
-          <h3 className="text-h3 font-space-grotesk text-themed-primary">{item.title}</h3>
-
-          {/* Badges */}
-          <div className="flex flex-wrap gap-2">
-            <span className={cn("flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold",
-              catColors[item.category] ?? "text-zinc-400", catBgs[item.category] ?? "bg-white/5")}>
-              <CatIcon className="w-3 h-3" />
-              {catRev[item.category] ?? item.category}
-            </span>
-            {isProduct ? (
-              <>
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-blue-400/10 text-blue-400 flex items-center gap-1">
-                  <Tag className="w-3 h-3" /> Produto
-                </span>
-                {item.condition === "new" && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-green-400/10 text-green-400">Novo</span>}
-                {item.condition === "used" && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-400/10 text-orange-400">Usado</span>}
-              </>
-            ) : (
-              <>
-                <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-purple-400/10 text-purple-400 flex items-center gap-1">
-                  <Wrench className="w-3 h-3" /> Serviço
-                </span>
-                {item.service_modality === "home" && (
-                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-accent-bisno/10 text-accent-bisno">Ao Domicílio</span>
-                )}
-                {item.service_modality === "in_person" && (
-                  <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-accent-games/10 text-accent-games">Presencial</span>
-                )}
-              </>
-            )}
+          {/* Title + badges */}
+          <div className="space-y-2">
+            <h3 className="text-h3 font-space-grotesk text-themed-primary">{item.title}</h3>
+            <div className="flex flex-wrap gap-1.5">
+              <span className={cn("flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold",
+                catColors[item.category] ?? "text-zinc-400", catBgs[item.category] ?? "bg-white/5")}>
+                <CatIcon className="w-3 h-3" />
+                {catRev[item.category] ?? item.category}
+              </span>
+              <span className={cn("px-2.5 py-1 rounded-full text-xs font-semibold flex items-center gap-1 border",
+                isProduct ? "bg-blue-400/10 text-blue-400 border-blue-400/20" : "bg-purple-400/10 text-purple-400 border-purple-400/20")}>
+                {isProduct ? <Tag className="w-3 h-3" /> : <Wrench className="w-3 h-3" />}
+                {isProduct ? "Produto" : "Serviço"}
+              </span>
+              {isProduct ? (
+                <>
+                  {item.condition === "new" && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-green-400/10 text-green-400 border border-green-400/20">Novo</span>}
+                  {item.condition === "used" && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-orange-400/10 text-orange-400 border border-orange-400/20">Usado</span>}
+                </>
+              ) : (
+                <>
+                  {item.service_modality === "home" && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-accent-bisno/10 text-accent-bisno border border-accent-bisno/20">Ao Domicílio</span>}
+                  {item.service_modality === "in_person" && <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-accent-games/10 text-accent-games border border-accent-games/20">Presencial</span>}
+                </>
+              )}
+            </div>
           </div>
 
           {/* Price */}
           <div className="glass-panel p-4 flex items-center justify-between">
-            <span className="text-sm text-themed-muted">{isProduct ? "Preço" : "Cobrança"}</span>
+            <div>
+              <span className="text-sm text-themed-muted">{isProduct ? "Preço" : "Cobrança"}</span>
+              {isProduct && item.negotiable && <p className="text-xs text-themed-muted/60">Negociável</p>}
+            </div>
             <span className="text-xl font-bold text-accent-bisno">
               {fmtPrice(item.price_centavos, isProduct ? null : item.price_type)}
-              {isProduct && item.negotiable && <span className="text-xs text-themed-muted ml-2">Negociável</span>}
             </span>
           </div>
 
@@ -204,37 +201,44 @@ function DetailSidePanel({ item, onClose, onEdit, onDelete, onStatus }: {
           {/* Location */}
           {(item.location_name || item.latitude) && (
             <div className="flex items-center gap-2 text-sm text-themed-muted">
-              <MapPin className="w-4 h-4" />
-              {item.location_name}
-              {item.distance_km && <span className="text-xs">· {item.distance_km} km</span>}
+              <MapPin className="w-4 h-4 shrink-0" />
+              <span>{item.location_name}</span>
+              {item.distance_km != null && <span className="text-xs">· {item.distance_km.toFixed(1)} km</span>}
             </div>
           )}
 
-          {/* Creator */}
-          <div className="flex items-center gap-3 pt-4 border-t border-white/5">
+          {/* Creator + date */}
+          <div className="flex items-center gap-3 pt-3 border-t border-white/5">
             <Avatar className="w-9 h-9">
               {item.creator_avatar ? <img src={item.creator_avatar} className="rounded-full" /> : null}
-              <AvatarFallback className="bg-accent-bisno/20 text-accent-bisno text-xs">
+              <AvatarFallback className="bg-accent-bisno/20 text-accent-bisno text-xs font-semibold">
                 {(item.creator_name ?? "U").charAt(0)}
               </AvatarFallback>
             </Avatar>
-            <div>
+            <div className="flex-1">
               <p className="text-body-sm font-medium text-themed-primary">{item.creator_name ?? "Utilizador"}</p>
               <p className="text-xs text-themed-muted">{timeAgo(item.created_at)}</p>
             </div>
+            {item.status !== "active" && (
+              <span className={cn("px-2.5 py-1 rounded-full text-[10px] font-semibold border",
+                item.status === "sold" ? "bg-green-400/10 text-green-400 border-green-400/20" :
+                item.status === "completed" ? "bg-blue-400/10 text-blue-400 border-blue-400/20" :
+                "bg-zinc-500/10 text-zinc-400 border-zinc-500/20")}>
+                {item.status === "sold" ? "Vendido" : item.status === "completed" ? "Completo" : item.status}
+              </span>
+            )}
           </div>
 
-          {/* Location + Contact buttons */}
+          {/* Action buttons — same as map */}
           <div className="flex gap-2">
             {item.latitude && (
-              <Button
-                onClick={() => navigate(`/mapa?lat=${item.latitude}&lng=${item.longitude}`)}
-                className="flex-1 bg-accent-games text-white hover:brightness-110 font-semibold text-sm" size="lg">
-                <MapPin className="w-4 h-4 mr-2" />
-                Ver no Mapa
+              <Button onClick={() => navigate(`/mapa?lat=${item.latitude}&lng=${item.longitude}`)}
+                className="flex-1 bg-accent-games text-white hover:brightness-110 font-semibold text-sm">
+                <Navigation className="w-4 h-4 mr-2" />
+                Rota
               </Button>
             )}
-            <Button className="flex-1 bg-accent-bisno text-surface hover:brightness-110 font-semibold" size="lg">
+            <Button className="flex-1 bg-accent-bisno text-surface hover:brightness-110 font-semibold text-sm">
               <ContactIcon className="w-4 h-4 mr-2" />
               {contactLabel(item.contact_method)}
             </Button>
@@ -242,11 +246,11 @@ function DetailSidePanel({ item, onClose, onEdit, onDelete, onStatus }: {
 
           {/* Creator actions */}
           {isCreator && item.status === "active" && (
-            <div className="flex gap-2 pt-2">
+            <div className="flex gap-2 pt-1">
               {onStatus && (
                 <Button onClick={() => onStatus(isProduct ? "sold" : "completed")}
                   className="flex-1 bg-green-500/20 text-green-300 border border-green-500/30 hover:bg-green-500/30 font-semibold text-sm" size="sm">
-                  {isProduct ? "Marcar Vendido" : "Marcar Completo"}
+                  {isProduct ? "Vendido" : "Completo"}
                 </Button>
               )}
               {onEdit && (
@@ -400,11 +404,33 @@ function PublishForm({ onPublished, editItem }: { onPublished: () => void; editI
     setPreviews(newFiles.map(f => URL.createObjectURL(f)));
   }
 
+  async function reverseGeocode(lat: number, lng: number) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=pt`,
+        { headers: { "User-Agent": "KalieApp/1.0" } },
+      );
+      const data = await res.json();
+      const addr = data?.address;
+      const province = addr?.state || "";
+      const municipality = addr?.municipality || addr?.city || addr?.town || addr?.village || "";
+      const parts = [province, municipality].filter(Boolean);
+      if (parts.length) f.setValue("location_name", parts.join(", "));
+    } catch {
+      // silencia — o campo fica vazio, o user pode preencher manualmente
+    }
+  }
+
   function useGps() {
     if (!navigator.geolocation) return;
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
-      (pos) => { setSelLat(pos.coords.latitude); setSelLng(pos.coords.longitude); setLocating(false); },
+      (pos) => {
+        setSelLat(pos.coords.latitude);
+        setSelLng(pos.coords.longitude);
+        setLocating(false);
+        reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+      },
       () => { setError("Não foi possível obter localização."); setLocating(false); },
       { enableHighAccuracy: true, timeout: 10000 },
     );
@@ -501,44 +527,106 @@ function PublishForm({ onPublished, editItem }: { onPublished: () => void; editI
     );
   }
 
+  const isProduct = watchType === "product";
+  const accent = isProduct ? "text-blue-400" : "text-purple-400";
+  const accentBg = isProduct ? "bg-blue-500/10" : "bg-purple-500/10";
+  const accentBorder = isProduct ? "border-blue-500/30" : "border-purple-500/30";
+  const accentGradient = isProduct
+    ? "from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
+    : "from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800";
+
   return (
     <div className="glass-panel luminous-edge rounded-xl p-6 max-w-2xl">
-      {/* Step indicator */}
-      <div className="flex items-center gap-3 mb-6">
-        <button onClick={() => setStep("type")} className="w-8 h-8 rounded-full bg-accent-bisno/10 text-accent-bisno flex items-center justify-center text-xs font-bold hover:bg-accent-bisno/20">1</button>
-        <div className="h-px flex-1 bg-white/10" />
-        <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold",
-          step === "specific" ? "bg-accent-bisno/10 text-accent-bisno" : "bg-white/10 text-zinc-500")}>2</div>
-        <div className="h-px flex-1 bg-white/10" />
-        <div className={cn("w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold",
-          submitting ? "bg-accent-bisno/10 text-accent-bisno" : "bg-white/10 text-zinc-500")}>3</div>
-      </div>
+      {/* Step indicator — service */}
+      {!isProduct && (
+        <div className="flex items-center gap-2 mb-6 px-1">
+          {[
+            { key: "type", label: "Tipo" },
+            { key: "common", label: "Serviço" },
+            { key: "submit", label: "Publicar" },
+          ].map((s, i) => {
+            const order = ["type", "common", "submit"];
+            const idx = order.indexOf(step);
+            const done = i < idx;
+            const active = i === idx;
+            return (
+              <div key={s.key} className="flex items-center gap-2 flex-1">
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold transition-all",
+                  active || done ? "bg-purple-500/15 text-purple-300 border border-purple-500/25" : "text-zinc-600 border border-transparent"
+                )}>
+                  <div className={cn("w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold",
+                    done ? "bg-purple-500 text-white" : active ? "bg-purple-500 text-white" : "bg-zinc-700 text-zinc-500")}>
+                    {done ? <Check className="w-3 h-3" /> : i + 1}
+                  </div>
+                  {s.label}
+                </div>
+                {i < 2 && <div className={cn("flex-1 h-px", done ? "bg-purple-500/30" : "bg-white/5")} />}
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {isProduct && (
+        <div className="flex items-center gap-3 mb-6">
+          <button onClick={() => setStep("type")}
+            className="w-9 h-9 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center text-sm font-bold hover:bg-blue-500/20 transition-all border border-blue-500/20">1</button>
+          <div className="h-px flex-1 bg-white/10" />
+          <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold transition-all border",
+            step === "common" ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-white/5 text-zinc-600 border-white/5")}>2</div>
+          <div className="h-px flex-1 bg-white/10" />
+          <div className={cn("w-9 h-9 rounded-xl flex items-center justify-center text-sm font-bold transition-all border",
+            step === "specific" || submitting ? "bg-blue-500/10 text-blue-400 border-blue-500/20" : "bg-white/5 text-zinc-600 border-white/5")}>3</div>
+        </div>
+      )}
 
       <form onSubmit={f.handleSubmit(onSubmit)}>
         {/* ── Step: Common ── */}
         {step === "common" && (
-          <div className="space-y-4">
-            <h3 className="text-h3 font-space-grotesk text-white flex items-center gap-2">
-              {watchType === "product" ? <Tag className="w-5 h-5 text-blue-400" /> : <Wrench className="w-5 h-5 text-purple-400" />}
-              Informações Gerais
-            </h3>
+          <div className="space-y-5">
+            {/* Section: Basic info */}
+            <div className="glass-panel border border-white/5 rounded-2xl p-5 space-y-5">
+              <h3 className="text-h3 font-space-grotesk text-white flex items-center gap-2">
+                {isProduct ? <Tag className="w-5 h-5 text-blue-400" /> : <Wrench className="w-5 h-5 text-purple-400" />}
+                {isProduct ? "Informação do Produto" : "Descreve o Teu Serviço"}
+              </h3>
 
-            {/* Photos */}
-            <div>
-              <label className={labelCls}>Fotos {previews.length > 0 && `(${previews.length}/6)`}</label>
+              <div>
+                <label className={labelCls}>Título</label>
+                <input {...f.register("title")} className={inputCls}
+                  placeholder={isProduct ? "Ex: iPhone 12, Bicicleta, Mesa de escritório" : "Ex: Reparação de computador, Aulas de inglês"} />
+                {f.formState.errors.title && <p className="text-accent-sos text-xs mt-1">{f.formState.errors.title.message}</p>}
+              </div>
+
+              <div>
+                <label className={labelCls}>Descrição</label>
+                <textarea {...f.register("description")} rows={4} className={cn(inputCls, "resize-none")}
+                  placeholder={isProduct
+                    ? "Descreve o produto em detalhe: marca, modelo, estado, ano, cor..."
+                    : "Explica o teu serviço: o que ofereces, quanto tempo leva, que ferramentas usas..."} />
+                {f.formState.errors.description && <p className="text-accent-sos text-xs mt-1">{f.formState.errors.description.message}</p>}
+              </div>
+            </div>
+
+            {/* Section: Photos */}
+            <div className="glass-panel border border-white/5 rounded-2xl p-5 space-y-3">
+              <h3 className="text-body-sm font-semibold text-white flex items-center gap-2">
+                <Image className="w-4 h-4 text-zinc-400" />
+                Fotos {previews.length > 0 && `(${previews.length}/6)`}
+              </h3>
               <div className="flex flex-wrap gap-2">
                 {previews.map((p, i) => (
-                  <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-white/10">
+                  <div key={i} className="relative w-20 h-20 rounded-xl overflow-hidden border border-white/10 group">
                     <img src={p} alt="" className="w-full h-full object-cover" />
                     <button type="button" onClick={() => removeImage(i)}
-                      className="absolute top-0.5 right-0.5 w-5 h-5 bg-black/60 rounded-full flex items-center justify-center">
-                      <X className="w-3 h-3 text-white" />
+                      className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <X className="w-5 h-5 text-white" />
                     </button>
                   </div>
                 ))}
                 {previews.length < 6 && (
                   <button type="button" onClick={() => fileRef.current?.click()}
-                    className="w-20 h-20 rounded-xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-1 hover:border-accent-bisno/40 transition-colors">
+                    className="w-20 h-20 rounded-xl border-2 border-dashed border-white/10 flex flex-col items-center justify-center gap-1 hover:border-accent-bisno/40 transition-colors hover:bg-white/5">
                     <Plus className="w-5 h-5 text-zinc-500" />
                     <span className="text-[10px] text-zinc-500">Foto</span>
                   </button>
@@ -547,110 +635,49 @@ function PublishForm({ onPublished, editItem }: { onPublished: () => void; editI
               <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={addImages} />
             </div>
 
-            <div>
-              <label className={labelCls}>Título</label>
-              <input {...f.register("title")} className={inputCls} placeholder="Ex: Reparação de computador" />
-              {f.formState.errors.title && <p className="text-accent-sos text-xs mt-1">{f.formState.errors.title.message}</p>}
-            </div>
-
-            <div>
+            {/* Section: Category */}
+            <div className="glass-panel border border-white/5 rounded-2xl p-5 space-y-3">
               <label className={labelCls}>Categoria</label>
-              <select {...f.register("category")} className={inputCls}>
-                <option value="">Seleccionar categoria</option>
-                {categoryLabels.filter(c => c !== "Todas").map(c => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-              {f.formState.errors.category && <p className="text-accent-sos text-xs mt-1">{f.formState.errors.category.message}</p>}
-            </div>
-
-            <div>
-              <label className={labelCls}>Descrição</label>
-              <textarea {...f.register("description")} rows={3} className={cn(inputCls, "resize-none")}
-                placeholder="Descreve o anúncio em detalhe..." />
-              {f.formState.errors.description && <p className="text-accent-sos text-xs mt-1">{f.formState.errors.description.message}</p>}
-            </div>
-
-            <div>
-              <label className={labelCls}>Localização</label>
-              <div className="flex gap-2 mb-2">
-                <input {...f.register("location_name")} className={cn(inputCls, "flex-1")} placeholder="Ex: Luanda, Talatona" />
-                <button type="button" onClick={useGps} disabled={locating}
-                  className="glass-panel border border-white/10 rounded-xl px-3 flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors">
-                  {locating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Navigation className="w-3.5 h-3.5 text-accent-bisno" />}
-                </button>
-              </div>
-              {selLat !== null && <p className="text-[10px] text-zinc-500">📍 {selLat.toFixed(4)}, {selLng?.toFixed(4)}</p>}
-            </div>
-
-            <div>
-              <label className={labelCls}>Método de Contacto</label>
-              <div className="flex gap-2">
-                {contactMethods.map(cm => {
-                  const active = contactMethod === cm.value;
+              <div className="grid grid-cols-3 gap-2">
+                {categoryLabels.filter(c => c !== "Todas").map(c => {
+                  const active = f.watch("category") === c;
+                  const Icon = categoryIcons[catMap[c]] ?? Tag;
                   return (
-                    <button key={cm.value} type="button" onClick={() => f.setValue("contact_method", cm.value)}
-                      className={cn("flex-1 flex items-center justify-center gap-1.5 glass-panel border rounded-xl px-3 py-3 text-xs transition-all",
-                        active ? "border-accent-bisno/50 text-accent-bisno bg-accent-bisno/10" : "border-white/10 text-zinc-400 hover:text-white")}>
-                      <cm.icon className="w-3.5 h-3.5" />
-                      {cm.label}
+                    <button key={c} type="button" onClick={() => f.setValue("category", c)}
+                      className={cn("flex flex-col items-center gap-1.5 glass-panel border rounded-xl px-3 py-3 text-xs transition-all",
+                        active
+                          ? `${isProduct ? "border-blue-500/40 bg-blue-500/10" : "border-purple-500/40 bg-purple-500/10"}`
+                          : "border-white/5 text-zinc-400 hover:border-white/20")}>
+                      <Icon className={cn("w-5 h-5", active ? accent : "text-zinc-500")} />
+                      <span className={active ? "text-white font-semibold" : "text-zinc-400"}>{c}</span>
                     </button>
                   );
                 })}
               </div>
-              <input {...f.register("contact_value")} className={cn(inputCls, "mt-2")}
-                placeholder={contactMethod === "chat" ? "—" : "Número de telefone com código (ex: +244...)"} />
+              {f.formState.errors.category && <p className="text-accent-sos text-xs">{f.formState.errors.category.message}</p>}
             </div>
 
-            <Button type="button" onClick={() => setStep("specific")} className="w-full bg-accent-bisno text-surface hover:brightness-110 font-semibold mt-2">
-              Continuar <ChevronRight className="w-4 h-4 ml-1" />
-            </Button>
-          </div>
-        )}
-
-        {/* ── Step: Specific ── */}
-        {step === "specific" && (
-          <div className="space-y-4">
-            {watchType === "product" ? (
-              <>
-                <h3 className="text-h3 font-space-grotesk text-white flex items-center gap-2">
-                  <Tag className="w-5 h-5 text-blue-400" /> Detalhes do Produto
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className={labelCls}>Preço (AOA)</label>
-                    <input {...f.register("price_centavos")} type="number" className={inputCls} placeholder="Ex: 5000" />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Estado</label>
-                    <select {...f.register("condition")} className={inputCls}>
-                      <option value="">Seleccionar</option>
-                      <option value="new">Novo</option>
-                      <option value="used">Usado</option>
-                    </select>
-                  </div>
-                </div>
-                <label className="flex items-center gap-3 glass-panel border border-white/10 rounded-xl px-4 py-3 cursor-pointer">
-                  <input type="checkbox" {...f.register("negotiable")} className="w-4 h-4 rounded accent-accent-bisno" />
-                  <span className="text-sm text-zinc-300">Preço negociável</span>
-                </label>
-              </>
-            ) : (
-              <>
-                <h3 className="text-h3 font-space-grotesk text-white flex items-center gap-2">
-                  <Wrench className="w-5 h-5 text-purple-400" /> Detalhes do Serviço
+            {/* Section: Pricing (service only on common step) */}
+            {!isProduct && (
+              <div className="glass-panel border border-white/5 rounded-2xl p-5 space-y-4">
+                <h3 className="text-body-sm font-semibold text-white flex items-center gap-2">
+                  <Tag className="w-4 h-4 text-purple-400" />
+                  Preço do Serviço
                 </h3>
                 <div>
                   <label className={labelCls}>Tipo de Cobrança</label>
                   <div className="grid grid-cols-3 gap-2">
                     {[
-                      { value: "fixed" as const, label: "Preço Fixo" },
-                      { value: "hourly" as const, label: "Por Hora" },
-                      { value: "negotiable" as const, label: "A Negociar" },
+                      { value: "fixed" as const, label: "Preço Fixo", icon: Tag },
+                      { value: "hourly" as const, label: "Por Hora", icon: Clock },
+                      { value: "negotiable" as const, label: "A Negociar", icon: MessageCircle },
                     ].map(pt => (
                       <button key={pt.value} type="button" onClick={() => f.setValue("price_type", pt.value)}
-                        className={cn("glass-panel border rounded-xl px-3 py-3 text-xs font-medium text-center transition-all",
-                          f.watch("price_type") === pt.value ? "border-accent-bisno/50 text-accent-bisno bg-accent-bisno/10" : "border-white/10 text-zinc-400 hover:text-white")}>
+                        className={cn("flex flex-col items-center gap-1 glass-panel border rounded-xl px-3 py-4 text-xs transition-all",
+                          f.watch("price_type") === pt.value
+                            ? "border-purple-500/40 bg-purple-500/10 text-purple-300"
+                            : "border-white/5 text-zinc-400 hover:border-white/20")}>
+                        <pt.icon className={cn("w-5 h-5", f.watch("price_type") === pt.value ? "text-purple-400" : "text-zinc-500")} />
                         {pt.label}
                       </button>
                     ))}
@@ -668,34 +695,182 @@ function PublishForm({ onPublished, editItem }: { onPublished: () => void; editI
                   <label className={labelCls}>Modalidade</label>
                   <div className="grid grid-cols-2 gap-2">
                     {[
-                      { value: "home" as const, label: "Ao Domicílio", desc: "Vou ao cliente" },
-                      { value: "in_person" as const, label: "Presencial", desc: "Cliente vem a mim" },
+                      { value: "home" as const, label: "Ao Domicílio", desc: "Vou ao cliente", icon: Home },
+                      { value: "in_person" as const, label: "Presencial", desc: "Cliente vem a mim", icon: Briefcase },
                     ].map(m => (
                       <button key={m.value} type="button" onClick={() => f.setValue("service_modality", m.value)}
-                        className={cn("glass-panel border rounded-xl px-4 py-4 text-left transition-all",
-                          f.watch("service_modality") === m.value ? "border-accent-bisno/50 bg-accent-bisno/10" : "border-white/10 hover:bg-white/5")}>
-                        <p className="text-sm font-semibold text-white">{m.label}</p>
-                        <p className="text-[10px] text-zinc-500 mt-0.5">{m.desc}</p>
+                        className={cn("flex items-center gap-3 glass-panel border rounded-xl px-4 py-4 text-left transition-all",
+                          f.watch("service_modality") === m.value
+                            ? "border-purple-500/40 bg-purple-500/10"
+                            : "border-white/5 hover:bg-white/5")}>
+                        <m.icon className={cn("w-6 h-6", f.watch("service_modality") === m.value ? "text-purple-400" : "text-zinc-500")} />
+                        <div>
+                          <p className="text-sm font-semibold text-white">{m.label}</p>
+                          <p className="text-[10px] text-zinc-500 mt-0.5">{m.desc}</p>
+                        </div>
                       </button>
                     ))}
                   </div>
                 </div>
-              </>
+              </div>
             )}
 
-            <div className="flex gap-3 mt-2">
+            {/* Section: Location */}
+            <div className="glass-panel border border-white/5 rounded-2xl p-5 space-y-3">
+              <h3 className="text-body-sm font-semibold text-white flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-zinc-400" />
+                Localização
+              </h3>
+              <div className="flex gap-2">
+                <input {...f.register("location_name")} className={cn(inputCls, "flex-1")}
+                  placeholder={isProduct ? "Ex: Luanda, Talatona" : "Onde prestas o serviço? Ex: Luanda, Talatona"} />
+                <button type="button" onClick={useGps} disabled={locating}
+                  className={cn("rounded-xl px-3 flex items-center gap-1.5 text-xs transition-all border",
+                    locating ? "bg-white/5 text-zinc-500 border-white/5" :
+                    `${accentBg} ${accent} ${accentBorder} hover:brightness-110`)}>
+                  {locating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Navigation className="w-3.5 h-3.5" />}
+                </button>
+              </div>
+              {selLat !== null && (
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] text-zinc-500 flex items-center gap-1"><MapPin className="w-3 h-3" /> {selLat.toFixed(4)}, {selLng?.toFixed(4)}</p>
+                  <button type="button" onClick={() => { setSelLat(null); setSelLng(null); f.setValue("location_name", ""); }}
+                    className="text-[10px] text-zinc-600 hover:text-accent-sos transition-colors">Limpar</button>
+                </div>
+              )}
+            </div>
+
+            {/* Section: Contact */}
+            <div className="glass-panel border border-white/5 rounded-2xl p-5 space-y-3">
+              <h3 className="text-body-sm font-semibold text-white flex items-center gap-2">
+                <Phone className="w-4 h-4 text-zinc-400" />
+                Contacto
+              </h3>
+              <div className="flex gap-2">
+                {contactMethods.map(cm => {
+                  const active = contactMethod === cm.value;
+                  return (
+                    <button key={cm.value} type="button" onClick={() => f.setValue("contact_method", cm.value)}
+                      className={cn("flex-1 flex items-center justify-center gap-1.5 glass-panel border rounded-xl px-3 py-3 text-xs transition-all",
+                        active
+                          ? `${isProduct ? "border-blue-500/40 bg-blue-500/10 text-blue-400" : "border-purple-500/40 bg-purple-500/10 text-purple-400"}`
+                          : "border-white/5 text-zinc-400 hover:border-white/20 hover:text-white")}>
+                      <cm.icon className="w-4 h-4" />
+                      {cm.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <input {...f.register("contact_value")} className={cn(inputCls)}
+                placeholder={contactMethod === "chat" ? "—" : "Número de telefone com código (ex: +244...)"} />
+            </div>
+
+            <Button type="button" onClick={() => isProduct ? setStep("specific") : setStep("submit")}
+              className={cn("w-full text-white font-semibold bg-gradient-to-r", accentGradient, "border-0")}>
+              {isProduct ? "Continuar para Preço" : "Publicar Serviço"}
+              <ChevronRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+        )}
+
+        {/* ── Step: Specific (product only) ── */}
+        {step === "specific" && isProduct && (
+          <div className="space-y-5">
+            <div className="glass-panel border border-white/5 rounded-2xl p-5 space-y-4">
+              <h3 className="text-h3 font-space-grotesk text-white flex items-center gap-2">
+                <Tag className="w-5 h-5 text-blue-400" /> Preço e Estado
+              </h3>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className={labelCls}>Preço (AOA)</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-xs text-zinc-500 font-bold">Kz</span>
+                    <input {...f.register("price_centavos")} type="number" className={cn(inputCls, "pl-10")} placeholder="5000" />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Estado</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: "new" as const, label: "Novo", icon: Tag },
+                      { value: "used" as const, label: "Usado", icon: Package },
+                    ].map(c => (
+                      <button key={c.value} type="button" onClick={() => f.setValue("condition", c.value)}
+                        className={cn("flex flex-col items-center gap-1 glass-panel border rounded-xl py-3 text-xs transition-all",
+                          f.watch("condition") === c.value
+                            ? "border-blue-500/40 bg-blue-500/10 text-blue-400"
+                            : "border-white/5 text-zinc-400 hover:border-white/20")}>
+                        <c.icon className="w-4 h-4" />
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+              <label className="flex items-center gap-3 glass-panel border border-white/10 rounded-xl px-4 py-3 cursor-pointer hover:bg-white/5 transition-colors">
+                <input type="checkbox" {...f.register("negotiable")} className="w-4 h-4 rounded accent-blue-500" />
+                <span className="text-sm text-zinc-300">Preço negociável</span>
+              </label>
+            </div>
+
+            <div className="flex gap-3">
               <Button type="button" variant="glass" onClick={() => setStep("common")} className="flex-1">
                 <ChevronLeft className="w-4 h-4 mr-1" /> Voltar
               </Button>
-              <Button type="submit" className="flex-1 bg-accent-bisno text-surface hover:brightness-110 font-semibold" disabled={submitting}>
+              <Button type="submit" className="flex-1 bg-gradient-to-r from-blue-600 to-blue-700 text-white font-semibold border-0" disabled={submitting}>
+                {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
+                Publicar Produto
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* ── Submit step (service only) ── */}
+        {step === "submit" && !isProduct && (
+          <div className="space-y-4 text-center py-6">
+            <div className="w-16 h-16 rounded-2xl bg-purple-500/10 flex items-center justify-center mx-auto border border-purple-500/20">
+              <Wrench className="w-8 h-8 text-purple-400" />
+            </div>
+            <h3 className="text-h3 font-space-grotesk text-white">Tudo pronto!</h3>
+            <p className="text-sm text-zinc-400 max-w-sm mx-auto">Revê as informações e publica o teu serviço.</p>
+
+            <div className="glass-panel border border-white/5 rounded-2xl p-4 space-y-2 text-left max-w-sm mx-auto">
+              <p className="text-sm text-white font-semibold">{f.watch("title")}</p>
+              <p className="text-xs text-zinc-400 line-clamp-2">{f.watch("description")}</p>
+              {f.watch("location_name") && (
+                <p className="text-xs text-zinc-500 flex items-center gap-1"><MapPin className="w-3 h-3" /> {f.watch("location_name")}</p>
+              )}
+              <div className="flex gap-2 pt-1">
+                {f.watch("price_type") && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-300">
+                    {f.watch("price_type") === "fixed" ? "Preço Fixo" : f.watch("price_type") === "hourly" ? "Por Hora" : "A Negociar"}
+                  </span>
+                )}
+                {f.watch("service_modality") && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-300">
+                    {f.watch("service_modality") === "home" ? "Ao Domicílio" : "Presencial"}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex gap-3 max-w-sm mx-auto">
+              <Button type="button" variant="glass" onClick={() => setStep("common")} className="flex-1">
+                <ChevronLeft className="w-4 h-4 mr-1" /> Voltar
+              </Button>
+              <Button type="submit" className="flex-1 bg-gradient-to-r from-purple-600 to-purple-700 text-white font-semibold border-0" disabled={submitting}>
                 {submitting ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
                 Publicar
               </Button>
             </div>
 
-            {error && <p className="text-accent-sos text-sm text-center mt-2">{error}</p>}
+            {error && <p className="text-accent-sos text-sm text-center mt-4">{error}</p>}
           </div>
         )}
+
+        {/* ── Submit step (product) — inline in specific */}
+
+        {error && step !== "submit" && <p className="text-accent-sos text-sm text-center mt-4">{error}</p>}
       </form>
     </div>
   );
@@ -811,13 +986,14 @@ export default function BisnoPage() {
 
   async function loadBisnos() {
     setLoading(true);
+    setError("");
     try {
       const params: Record<string, any> = { ...filters };
       if (!params.status) params.status = "active";
       params.limit = 50;
       const data = await bisnoApi.list(params);
       setAllBisnos(data);
-    } catch (e) { setError(extractApiError(e)); }
+    } catch (e) { setError(extractApiError(e)); setAllBisnos([]); }
     finally { setLoading(false); }
   }
 
@@ -863,11 +1039,11 @@ export default function BisnoPage() {
         </div>
         <div className="flex gap-3 text-center">
           <div className="glass-panel rounded-lg px-4 py-2">
-            <p className="text-h3 font-space-grotesk font-bold text-accent-bisno">{activeCount}</p>
+            <p className="text-h3 font-space-grotesk font-bold text-accent-bisno">{loading ? "—" : activeCount}</p>
             <p className="text-zinc-500 text-xs">Activos</p>
           </div>
           <div className="glass-panel rounded-lg px-4 py-2">
-            <p className="text-h3 font-space-grotesk font-bold text-accent-feed">{todayCount}</p>
+            <p className="text-h3 font-space-grotesk font-bold text-accent-feed">{loading ? "—" : todayCount}</p>
             <p className="text-zinc-500 text-xs">Hoje</p>
           </div>
           {userPos && (

@@ -307,15 +307,15 @@ async def cancel_raffle_with_refunds(
                     status=TransactionStatus.REVERSED,
                     amount_centavos=raffle.ticket_price_centavos,
                     balance_after_centavos=wallet.balance_centavos,
-                    description=f"Reembolso rifa cancelada: {raffle.title}",
+                    description=f"Reembolso sorteio cancelado: {raffle.title}",
                 )
                 db.add(tx)
                 refunded_count += 1
 
             await _notify(
                 db, ticket.user_id, "raffle_cancelled_refund",
-                "Rifa cancelada — reembolso",
-                f"A rifa \"{raffle.title}\" foi cancelada. O valor foi reembolsado.",
+                "Sorteio cancelado — reembolso",
+                f"O sorteio \"{raffle.title}\" foi cancelado. O valor foi reembolsado.",
                 {"raffle_id": str(raffle.id), "ticket_number": ticket.ticket_number},
             )
 

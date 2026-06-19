@@ -169,7 +169,7 @@ async def confirm_by_code(
         await _notify(
             db, dc.creator_id, "raffle_delivery_confirmed_winner",
             "Vencedor confirmou entrega",
-            f"O vencedor confirmou a receção do prémio da rifa. Confirma também a entrega para libertares o pagamento.",
+            f"O vencedor confirmou a receção do prémio do sorteio. Confirma também a entrega para libertares o pagamento.",
             {"raffle_id": str(raffle_id)},
         )
     else:
@@ -193,10 +193,10 @@ async def confirm_by_creator(
     )
     dc = result.scalar_one_or_none()
     if not dc:
-        raise HTTPException(status_code=404, detail="Nenhum código de entrega encontrado para esta rifa.")
+        raise HTTPException(status_code=404, detail="Nenhum código de entrega encontrado para este sorteio.")
 
     if str(dc.creator_id) != str(user.id):
-        raise HTTPException(status_code=403, detail="Apenas o criador da rifa pode confirmar a entrega.")
+        raise HTTPException(status_code=403, detail="Apenas o criador do sorteio pode confirmar a entrega.")
 
     if dc.status == DeliveryStatus.COMPLETED:
         raise HTTPException(status_code=400, detail="Entrega já foi concluída.")
@@ -222,7 +222,7 @@ async def confirm_by_creator(
         await _notify(
             db, dc.winner_id, "raffle_delivery_confirmed_creator",
             "Criador confirmou entrega",
-            f"O criador da rifa confirmou a entrega. Confirma também a receção para libertares o processo.",
+            f"O criador do sorteio confirmou a entrega. Confirma também a receção para libertares o processo.",
             {"raffle_id": str(raffle_id)},
         )
 
@@ -243,7 +243,7 @@ async def confirm_by_code_creator(
         raise HTTPException(status_code=404, detail="Código de entrega inválido.")
 
     if str(dc.creator_id) != str(user.id):
-        raise HTTPException(status_code=403, detail="Este código não pertence a uma rifa tua.")
+        raise HTTPException(status_code=403, detail="Este código não pertence a um sorteio teu.")
 
     if dc.status == DeliveryStatus.COMPLETED:
         raise HTTPException(status_code=400, detail="Entrega já foi concluída.")
@@ -303,7 +303,7 @@ async def _release_escrow(dc: DeliveryCode, db: AsyncSession) -> None:
         status=TransactionStatus.COMPLETED,
         amount_centavos=amount,
         balance_after_centavos=wallet.balance_centavos,
-        description=f"Pagamento entrega rifa: {raffle.title}",
+        description=f"Pagamento entrega sorteio: {raffle.title}",
     )
     db.add(tx)
 
@@ -322,7 +322,7 @@ async def _release_escrow(dc: DeliveryCode, db: AsyncSession) -> None:
     await _notify(
         db, dc.creator_id, "raffle_payment_released",
         "Pagamento libertado!",
-        f"O pagamento de {amount/100:.2f} AOA pela rifa \"{raffle.title}\" foi libertado para a tua carteira.",
+        f"O pagamento de {amount/100:.2f} AOA pelo sorteio \"{raffle.title}\" foi libertado para a tua carteira.",
         {"raffle_id": str(dc.raffle_id), "amount_centavos": amount},
     )
 
@@ -341,7 +341,7 @@ async def open_dispute(
     )
     dc = result.scalar_one_or_none()
     if not dc:
-        raise HTTPException(status_code=404, detail="Nenhum código de entrega encontrado para esta rifa.")
+        raise HTTPException(status_code=404, detail="Nenhum código de entrega encontrado para este sorteio.")
 
     if dc.status == DeliveryStatus.COMPLETED:
         raise HTTPException(status_code=400, detail="Entrega já foi concluída.")
@@ -364,13 +364,13 @@ async def open_dispute(
     await _notify(
         db, dc.winner_id, "raffle_dispute_opened",
         "Disputa aberta",
-        f"Foi aberta uma disputa para a rifa. Motivo: {reason}",
+        f"Foi aberta uma disputa para o sorteio. Motivo: {reason}",
         {"raffle_id": str(dc.raffle_id)},
     )
     await _notify(
         db, dc.creator_id, "raffle_dispute_opened",
         "Disputa aberta",
-        f"Foi aberta uma disputa para a rifa. Motivo: {reason}",
+        f"Foi aberta uma disputa para o sorteio. Motivo: {reason}",
         {"raffle_id": str(dc.raffle_id)},
     )
 

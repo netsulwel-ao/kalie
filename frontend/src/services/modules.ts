@@ -45,7 +45,8 @@ export interface Raffle {
   nonce: number;
   winner_id: string | null;
   winning_ticket: number | null;
-  ends_at: string;
+  ends_at: string | null;
+  starts_at: string | null;
   created_at: string;
   activated_at: string | null;
   drawn_at: string | null;
@@ -420,7 +421,8 @@ export function timeAgo(dateStr: string): string {
   return `há ${days}d`;
 }
 
-export function timeLeft(dateStr: string): string {
+export function timeLeft(dateStr: string | null | undefined): string {
+  if (!dateStr) return "—";
   const diff = new Date(dateStr).getTime() - Date.now();
   if (diff <= 0) return "Terminado";
   const mins = Math.floor(diff / 60000);

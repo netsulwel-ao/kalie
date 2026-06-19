@@ -74,7 +74,8 @@ class Raffle(Base):
     drawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_auto_closed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    ends_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    starts_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -84,7 +85,13 @@ class Raffle(Base):
     delivery_code: Mapped["DeliveryCode | None"] = relationship("DeliveryCode", back_populates="raffle", uselist=False, cascade="all, delete-orphan")
 
     def is_active(self) -> bool:
-        return self.status == RaffleStatus.ACTIVE and datetime.now(timezone.utc) < self.ends_at and self.tickets_sold < self.max_tickets
+        if self.status != RaffleStatus.ACTIVE:
+            return False
+        if self.ends_at and datetime.now(timezone.utc) >= self.ends_at:
+            return False
+        if self.tickets_sold >= self.max_tickets:
+            return False
+        return True
 
     def pct_sold(self) -> float:
         return round((self.tickets_sold / self.max_tickets) * 100, 1) if self.max_tickets > 0 else 0

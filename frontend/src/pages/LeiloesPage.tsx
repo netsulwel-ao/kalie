@@ -9,28 +9,7 @@ import { cn } from "@/lib/utils";
 import { useAuthStore } from "@/stores/authStore";
 import { auctionsApi, formatAOA, type Auction, type BidHistoryItem, type ParticipantInfo, type AuctionMyWin, type AuctionDeliveryStatus } from "@/services/modules";
 import { extractApiError } from "@/services/api";
-
-// ── Countdown component (real-time) ────────────────────────────────────────────
-function CountdownText({ endAt, extendedAt }: { endAt: string; extendedAt: string | null }) {
-  const [remaining, setRemaining] = useState("");
-  useEffect(() => {
-    function tick() {
-      const diff = new Date(extendedAt || endAt).getTime() - Date.now();
-      if (diff <= 0) { setRemaining("Terminado"); return; }
-      const d = Math.floor(diff / 86400000);
-      const h = Math.floor((diff % 86400000) / 3600000);
-      const m = Math.floor((diff % 3600000) / 60000);
-      const s = Math.floor((diff % 60000) / 1000);
-      if (d > 0) setRemaining(`${d}d ${h}h ${m}m ${s}s`);
-      else if (h > 0) setRemaining(`${h}h ${m}m ${s}s`);
-      else setRemaining(`${m}m ${s}s`);
-    }
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [endAt, extendedAt]);
-  return <>{remaining}</>;
-}
+import { CountdownText } from "@/components/ui/countdown-text";
 
 // ── Auction Card component ─────────────────────────────────────────────────────
 function AuctionCard({ a, user, bidAmounts, setBidAmounts, bidding, placeBid, openDetail, finalize }: {
@@ -44,12 +23,15 @@ function AuctionCard({ a, user, bidAmounts, setBidAmounts, bidding, placeBid, op
     const isCreator = !!(user?.id && String(a.creator_id) === String(user.id));
     const isFinished = a.status === "finished";
     const now = Date.now();
+    const startTime = a.starts_at ? new Date(a.starts_at).getTime() : null;
+    const hasStarted = !startTime || startTime <= now;
     const endTime = new Date(a.ends_at_extended || a.ends_at).getTime();
     const isExpired = !isFinished && endTime < now;
-    const isUrgent = !isFinished && !isExpired && endTime - now < 3600000;
+    const isUrgent = !isFinished && !isExpired && hasStarted && endTime - now < 3600000;
+    const notStarted = !isFinished && !!startTime && startTime > now;
     const minBid = a.min_next_bid / 100;
     const pos = a.user_position;
-    const showBidArea = !isFinished && !isExpired && !isCreator;
+    const showBidArea = !isFinished && !isExpired && !isCreator && hasStarted;
 
     if (isFinished) {
       return (
@@ -89,8 +71,8 @@ function AuctionCard({ a, user, bidAmounts, setBidAmounts, bidding, placeBid, op
       <div className={cn("glass-panel luminous-edge rounded-xl overflow-hidden transition-all hover:border-white/20",
         isUrgent && "border-accent-sos/30")}>
         {a.image_url && (
-          <div className="w-full aspect-[16/9] bg-zinc-900/50 flex items-center justify-center overflow-hidden">
-            <img src={a.image_url} alt={a.title} className="w-full h-full object-contain" />
+          <div className="w-full h-36 bg-zinc-900/50 flex items-center justify-center overflow-hidden">
+            <img src={a.image_url} alt={a.title} className="w-full h-full object-cover" />
           </div>
         )}
         <div className={cn("px-5 py-3 flex items-center justify-between border-b border-white/5",
@@ -98,8 +80,8 @@ function AuctionCard({ a, user, bidAmounts, setBidAmounts, bidding, placeBid, op
           <div className="flex items-center gap-2">
             <Gavel className={cn("w-4 h-4", isExpired ? "text-zinc-500" : isUrgent ? "text-accent-sos" : "text-themed-muted")} />
             <span className={cn("text-label-caps uppercase font-bold text-xs",
-              isExpired ? "text-zinc-500" : isUrgent ? "text-accent-sos" : "text-themed-muted")}>
-              {isExpired ? "Expirado" : isUrgent ? "A terminar" : "Activo"}
+              isExpired ? "text-zinc-500" : isUrgent ? "text-accent-sos" : notStarted ? "text-accent-gold" : "text-themed-muted")}>
+              {isExpired ? "Expirado" : isUrgent ? "A terminar" : notStarted ? "Não iniciado" : "Activo"}
             </span>
           </div>
           <div className="flex items-center gap-3 text-themed-muted text-body-sm">
@@ -124,10 +106,21 @@ function AuctionCard({ a, user, bidAmounts, setBidAmounts, bidding, placeBid, op
               <p className="text-h2 font-space-grotesk text-themed-primary">{formatAOA(a.current_bid_centavos)}</p>
             </div>
             <div className="text-right">
-              <p className="text-label-caps text-themed-muted uppercase mb-1">{isExpired ? "Expirado" : "Termina em"}</p>
-              <p className={cn("font-bold flex items-center gap-1", isExpired ? "text-zinc-500" : isUrgent ? "text-accent-sos" : "text-accent-gold")}>
-                <Clock className="w-4 h-4" /> {isExpired ? "---" : <CountdownText endAt={a.ends_at} extendedAt={a.ends_at_extended} />}
-              </p>
+              {notStarted ? (
+                <>
+                  <p className="text-label-caps text-themed-muted uppercase mb-1">Começa em</p>
+                  <p className="font-bold flex items-center gap-1 text-accent-gold">
+                    <Clock className="w-4 h-4" /> <CountdownText targetDate={a.starts_at!} prefix="" />
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-label-caps text-themed-muted uppercase mb-1">{isExpired ? "Expirado" : "Termina em"}</p>
+                  <p className={cn("font-bold flex items-center gap-1", isExpired ? "text-zinc-500" : isUrgent ? "text-accent-sos" : "text-accent-gold")}>
+                    <Clock className="w-4 h-4" /> {isExpired ? "---" : <CountdownText targetDate={a.ends_at_extended || a.ends_at} />}
+                  </p>
+                </>
+              )}
             </div>
           </div>
 
@@ -545,7 +538,7 @@ export default function LeiloesPage() {
       {detail && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto"
           onClick={() => setDetail(null)}>
-          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-w-lg border border-white/10 my-2 sm:my-4 mx-auto"
+          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-h-[85dvh] overflow-y-auto max-w-lg border border-white/10 my-2 sm:my-4 mx-auto"
             onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">{detail.title}</h3>
@@ -701,7 +694,7 @@ export default function LeiloesPage() {
       {/* ── Delivery Code Confirmation Modal (matches RifasPage) ── */}
       {deliveryLookupResult && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-w-lg border border-white/10 my-2 sm:my-4 mx-auto">
+          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-h-[85dvh] overflow-y-auto max-w-lg border border-white/10 my-2 sm:my-4 mx-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Confirmar Entrega</h3>
               <button onClick={() => { setDeliveryLookupResult(null); setDeliveryCode(""); setDeliveryLookupError(""); }} className="p-1 hover:bg-white/5 rounded-lg transition-colors">
@@ -763,7 +756,7 @@ export default function LeiloesPage() {
       {/* ── Modal criar leilão ────────────────────────────────── */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-w-3xl border border-white/10 my-2 sm:my-4 mx-auto">
+          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-h-[85dvh] overflow-y-auto max-w-3xl border border-white/10 my-2 sm:my-4 mx-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Criar Leilão</h3>
               <button onClick={() => setShowCreate(false)} className="p-1 hover:bg-white/5 rounded-lg transition-colors"><X className="w-5 h-5 text-themed-muted" /></button>

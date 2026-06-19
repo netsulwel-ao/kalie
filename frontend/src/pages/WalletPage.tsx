@@ -20,7 +20,7 @@ const TX_ICONS: Record<string, React.ElementType> = {
 const TX_LABELS: Record<string, string> = {
   deposit: "Depósito", withdrawal: "Levantamento",
   transfer_in: "Transferência recebida", transfer_out: "Transferência enviada",
-  raffle_entry: "Bilhete de rifa", raffle_win: "Prémio de rifa",
+  raffle_entry: "Bilhete de sorteio", raffle_win: "Prémio de sorteio",
   auction_bid: "Lance de leilão", auction_refund: "Reembolso de leilão",
   game_win: "Ganho de jogo", game_loss: "Perda de jogo", fee: "Taxa",
 };

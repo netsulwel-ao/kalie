@@ -54,7 +54,8 @@ class RaffleOut(BaseModel):
     nonce: int = 0
     winner_id: str | None
     winning_ticket: int | None
-    ends_at: datetime
+    ends_at: datetime | None
+    starts_at: datetime | None
     created_at: datetime
     activated_at: datetime | None
     drawn_at: datetime | None
@@ -113,6 +114,7 @@ def _raffle_out(r: Raffle, buyer_count: int = 0) -> RaffleOut:
         winner_id=str(r.winner_id) if r.winner_id else None,
         winning_ticket=r.winning_ticket,
         ends_at=r.ends_at,
+        starts_at=r.starts_at,
         created_at=r.created_at,
         activated_at=r.activated_at,
         drawn_at=r.drawn_at,
@@ -135,27 +137,32 @@ async def _can_auto_close(raffle: Raffle) -> bool:
     now = datetime.now(timezone.utc)
     return (
         raffle.status == RaffleStatus.ACTIVE
-        and (now >= raffle.ends_at or raffle.tickets_sold >= raffle.max_tickets)
+        and (raffle.tickets_sold >= raffle.max_tickets or (raffle.ends_at is not None and now >= raffle.ends_at))
     )
 
 
 async def _auto_close_expired(db: AsyncSession) -> None:
     """Auto-close any active raffles past their end time or fully sold."""
     now = datetime.now(timezone.utc)
-    result = await db.execute(
-        select(Raffle).where(
-            Raffle.status == RaffleStatus.ACTIVE,
-            Raffle.ends_at <= now,
-        ).with_for_update()
-    )
-    sold_out_result = await db.execute(
-        select(Raffle).where(
-            Raffle.status == RaffleStatus.ACTIVE,
-            Raffle.tickets_sold >= Raffle.max_tickets,
-            Raffle.ends_at > now,
-        ).with_for_update()
-    )
-    expired = result.scalars().all() + sold_out_result.scalars().all()
+    # Raffles with ends_at that have passed
+    expired_q = select(Raffle).where(
+        Raffle.status == RaffleStatus.ACTIVE,
+        Raffle.ends_at.isnot(None),
+        Raffle.ends_at <= now,
+    ).with_for_update()
+    result = await db.execute(expired_q)
+    # Raffles sold out (with or without ends_at)
+    sold_out_q = select(Raffle).where(
+        Raffle.status == RaffleStatus.ACTIVE,
+        Raffle.tickets_sold >= Raffle.max_tickets,
+    ).with_for_update()
+    sold_out_result = await db.execute(sold_out_q)
+    seen_ids: set[uuid.UUID] = set()
+    expired: list[Raffle] = []
+    for r in result.scalars().all() + sold_out_result.scalars().all():
+        if r.id not in seen_ids:
+            seen_ids.add(r.id)
+            expired.append(r)
     for raffle in expired:
         if raffle.tickets_sold == 0:
             raffle.status = RaffleStatus.CANCELLED
@@ -188,6 +195,25 @@ async def _auto_close_expired(db: AsyncSession) -> None:
         await db.commit()
 
 
+async def _auto_activate_scheduled(db: AsyncSession) -> None:
+    """Auto-activate any draft raffles whose starts_at has passed."""
+    now = datetime.now(timezone.utc)
+    result = await db.execute(
+        select(Raffle).where(
+            Raffle.status == RaffleStatus.DRAFT,
+            Raffle.starts_at.isnot(None),
+            Raffle.starts_at <= now,
+        ).with_for_update()
+    )
+    drafts = result.scalars().all()
+    for raffle in drafts:
+        raffle.status = RaffleStatus.ACTIVE
+        raffle.activated_at = now
+        await pre_generate_tickets(raffle, db)
+    if drafts:
+        await db.commit()
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @router.get("", response_model=list[RaffleOut])
@@ -197,6 +223,10 @@ async def list_raffles(
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_db),
 ):
+    try:
+        await _auto_activate_scheduled(db)
+    except Exception:
+        pass
     try:
         await _auto_close_expired(db)
     except Exception:
@@ -209,7 +239,7 @@ async def list_raffles(
         # Safety filter: never show expired/sold-out raffles in "active" tab
         if status == "active":
             q = q.where(
-                or_(Raffle.ends_at > now, Raffle.tickets_sold < Raffle.max_tickets)
+                or_(Raffle.ends_at == None, Raffle.ends_at > now, Raffle.tickets_sold < Raffle.max_tickets)
             )
     result = await db.execute(q)
     raffles = result.scalars().all()
@@ -226,15 +256,20 @@ async def create_raffle(
     description: str = Form(...),
     ticket_price_centavos: int = Form(..., gt=0),
     max_tickets: int = Form(..., gt=0, le=100000),
-    ends_at: datetime = Form(...),
+    starts_at: datetime | None = Form(None),
+    ends_at: datetime | None = Form(None),
     image: UploadFile | None = File(None),
     video_url: str | None = Form(None),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a raffle in draft status. Activate separately to generate tickets."""
-    if ends_at <= datetime.now(timezone.utc):
+    """Create a raffle in draft status. Activate separately or auto-activate at starts_at."""
+    if ends_at and ends_at <= datetime.now(timezone.utc):
         raise HTTPException(status_code=400, detail="A data de encerramento deve ser futura.")
+    if starts_at and starts_at <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=400, detail="A data de início deve ser futura.")
+    if starts_at and ends_at and starts_at >= ends_at:
+        raise HTTPException(status_code=400, detail="A data de início deve ser anterior à data de encerramento.")
 
     image_url = None
     if image and image.filename:
@@ -255,6 +290,7 @@ async def create_raffle(
         status=RaffleStatus.DRAFT,
         server_seed=server_seed,
         server_seed_hash=server_seed_hash,
+        starts_at=starts_at,
         ends_at=ends_at,
     )
     db.add(raffle)
@@ -265,11 +301,15 @@ async def create_raffle(
 
 @router.get("/{raffle_id}", response_model=RaffleOut)
 async def get_raffle(raffle_id: str, db: AsyncSession = Depends(get_db)):
+    try:
+        await _auto_activate_scheduled(db)
+    except Exception:
+        pass
     await _auto_close_expired(db)
     result = await db.execute(select(Raffle).where(Raffle.id == uuid.UUID(raffle_id)))
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     bc = await _count_buyers(raffle.id, db)
     return _raffle_out(raffle, bc)
 
@@ -284,11 +324,11 @@ async def activate_raffle(
     result = await db.execute(select(Raffle).where(Raffle.id == uuid.UUID(raffle_id)))
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     if str(raffle.creator_id) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Apenas o criador pode activar a rifa.")
+        raise HTTPException(status_code=403, detail="Apenas o criador pode activar o sorteio.")
     if raffle.status != RaffleStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="Apenas rifas em rascunho podem ser activadas.")
+        raise HTTPException(status_code=400, detail="Apenas sorteios em rascunho podem ser activados.")
 
     raffle.status = RaffleStatus.ACTIVE
     raffle.activated_at = datetime.now(timezone.utc)
@@ -311,15 +351,15 @@ async def buy_ticket(
     )
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     if raffle.status != RaffleStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Esta rifa não está activa.")
+        raise HTTPException(status_code=400, detail="Este sorteio não está activo.")
     if raffle.tickets_sold >= raffle.max_tickets:
         raise HTTPException(status_code=400, detail="Todos os bilhetes foram vendidos.")
-    if datetime.now(timezone.utc) > raffle.ends_at:
-        raise HTTPException(status_code=400, detail="Esta rifa já terminou.")
+    if raffle.ends_at and datetime.now(timezone.utc) > raffle.ends_at:
+        raise HTTPException(status_code=400, detail="Este sorteio já terminou.")
     if str(raffle.creator_id) == str(current_user.id):
-        raise HTTPException(status_code=400, detail="O criador não pode comprar bilhetes na sua própria rifa.")
+        raise HTTPException(status_code=400, detail="O criador não pode comprar bilhetes no seu próprio sorteio.")
 
     wallet = await _get_wallet(current_user.id, db)
     if wallet.available_centavos < raffle.ticket_price_centavos:
@@ -334,7 +374,7 @@ async def buy_ticket(
         status=TransactionStatus.COMPLETED,
         amount_centavos=raffle.ticket_price_centavos,
         balance_after_centavos=wallet.balance_centavos,
-        description=f"Bilhete rifa: {raffle.title}",
+        description=f"Bilhete sorteio: {raffle.title}",
         created_at=datetime.now(timezone.utc),
     )
     db.add(tx)
@@ -471,11 +511,11 @@ async def close_raffle(
     )
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     if raffle.status == RaffleStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="Rifa em rascunho. Active primeiro.")
+        raise HTTPException(status_code=400, detail="Sorteio em rascunho. Active primeiro.")
     if raffle.status != RaffleStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Rifa já foi sorteada ou cancelada.")
+        raise HTTPException(status_code=400, detail="Sorteio já foi realizado ou cancelado.")
     if raffle.tickets_sold == 0:
         raise HTTPException(status_code=400, detail="Nenhum bilhete vendido.")
 
@@ -544,7 +584,7 @@ async def cancel_raffle(
     )
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     if str(raffle.creator_id) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Apenas o criador pode cancelar.")
 
@@ -555,7 +595,7 @@ async def cancel_raffle(
         return _raffle_out(raffle)
 
     if raffle.status != RaffleStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Rifa já foi sorteada ou cancelada.")
+        raise HTTPException(status_code=400, detail="Sorteio já foi realizado ou cancelado.")
 
     # Active with sales — check min threshold and refund
     if raffle.tickets_sold > raffle.min_tickets_for_draw:
@@ -596,11 +636,11 @@ async def reserve_raffle_ticket(
     )
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     if raffle.status != RaffleStatus.ACTIVE:
-        raise HTTPException(status_code=400, detail="Rifa não está activa.")
+        raise HTTPException(status_code=400, detail="Sorteio não está activo.")
     if str(raffle.creator_id) == str(current_user.id):
-        raise HTTPException(status_code=400, detail="O criador não pode reservar na sua própria rifa.")
+        raise HTTPException(status_code=400, detail="O criador não pode reservar no seu próprio sorteio.")
 
     try:
         ticket = await reserve_ticket(raffle, ticket_number, current_user, db)
@@ -630,7 +670,7 @@ async def confirm_ticket_purchase(
     )
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
 
     ticket_result = await db.execute(
         select(RaffleTicket).where(RaffleTicket.id == uuid.UUID(ticket_id)).with_for_update()
@@ -718,7 +758,7 @@ async def list_participants(
     result = await db.execute(select(Raffle).where(Raffle.id == uuid.UUID(raffle_id)))
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     participants = await get_participants(uuid.UUID(raffle_id), db)
     return [ParticipantOut(**p) for p in participants]
 
@@ -807,7 +847,7 @@ async def lookup_delivery_by_code(
 
     raffle = await db.get(Raffle, dc.raffle_id)
     if not raffle or str(raffle.creator_id) != str(current_user.id):
-        raise HTTPException(status_code=403, detail="Não és o criador desta rifa.")
+        raise HTTPException(status_code=403, detail="Não és o criador deste sorteio.")
 
     winner_name = None
     if dc.winner_id:
@@ -909,7 +949,7 @@ async def set_min_sales(
     result = await db.execute(select(Raffle).where(Raffle.id == uuid.UUID(raffle_id)))
     raffle = result.scalar_one_or_none()
     if not raffle:
-        raise HTTPException(status_code=404, detail="Rifa não encontrada.")
+        raise HTTPException(status_code=404, detail="Sorteio não encontrado.")
     if str(raffle.creator_id) != str(current_user.id):
         raise HTTPException(status_code=403, detail="Apenas o criador pode definir este valor.")
     if body.min_tickets_for_draw < 0 or body.min_tickets_for_draw > raffle.max_tickets:

@@ -7,9 +7,10 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { rafflesApi, formatAOA, timeLeft, type Raffle, type RaffleTicket, type ReserveResult, type RaffleTicketFull, type Participant, type DeliveryCode } from "@/services/modules";
+import { rafflesApi, formatAOA, type Raffle, type RaffleTicket, type ReserveResult, type RaffleTicketFull, type Participant, type DeliveryCode } from "@/services/modules";
 import { extractApiError } from "@/services/api";
 import { useAuthStore } from "@/stores/authStore";
+import { CountdownText } from "@/components/ui/countdown-text";
 
 function ProgressBar({ pct, color = "bg-accent-games" }: { pct: number; color?: string }) {
   return (
@@ -72,8 +73,9 @@ export default function RifasPage() {
 
   const [form, setForm] = useState({
     title: "", description: "", ticket_price: "", max_tickets: "",
-    ends_at: "", video_url: "",
+    starts_at: "", ends_at: "", video_url: "",
   });
+  const [endOnSoldOut, setEndOnSoldOut] = useState(false);
 
   async function load(silent = false) {
     if (!silent) setInitialLoading(true);
@@ -236,12 +238,14 @@ export default function RifasPage() {
       fd.append("description", form.description);
       fd.append("ticket_price_centavos", String(Math.round(parseFloat(form.ticket_price) * 100)));
       fd.append("max_tickets", form.max_tickets);
-      fd.append("ends_at", new Date(form.ends_at).toISOString());
+      if (form.starts_at) fd.append("starts_at", new Date(form.starts_at).toISOString());
+      if (!endOnSoldOut && form.ends_at) fd.append("ends_at", new Date(form.ends_at).toISOString());
       if (form.video_url) fd.append("video_url", form.video_url);
       if (fileRef.current?.files?.[0]) fd.append("image", fileRef.current.files[0]);
       await rafflesApi.create(fd);
       setShowCreate(false);
-      setForm({ title: "", description: "", ticket_price: "", max_tickets: "", ends_at: "", video_url: "" });
+      setForm({ title: "", description: "", ticket_price: "", max_tickets: "", starts_at: "", ends_at: "", video_url: "" });
+      setEndOnSoldOut(false);
       setImagePreview(null);
       await load(false);
     } catch (e) {
@@ -268,8 +272,8 @@ export default function RifasPage() {
             <ShieldCheck className="w-4 h-4 text-accent-feed" />
             <span className="text-body-sm text-accent-feed font-medium">Provably Fair</span>
           </div>
-          <Button className="bg-accent-games text-white hover:brightness-110" onClick={() => setShowCreate(true)}>
-            <Plus className="w-4 h-4 mr-2" /> Criar Rifa
+          <Button className="bg-accent-bisno text-zinc-950 hover:brightness-110" onClick={() => setShowCreate(true)}>
+            <Plus className="w-4 h-4 mr-2" /> Criar Sorteio
           </Button>
         </div>
       </div>
@@ -340,7 +344,7 @@ export default function RifasPage() {
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-3">
                       <Star className="w-4 h-4 text-accent-gold fill-accent-gold" />
-                      <span className="text-label-caps text-accent-gold uppercase">Rifa em Destaque</span>
+                      <span className="text-label-caps text-accent-gold uppercase">Sorteio em Destaque</span>
                     </div>
                     <h2 className="text-h2 font-space-grotesk text-themed-primary mb-2">{featured.title}</h2>
                     <p className="text-body-md text-themed-secondary mb-4 line-clamp-2">{featured.description}</p>
@@ -349,12 +353,35 @@ export default function RifasPage() {
                         <p className="text-label-caps text-themed-muted uppercase">Bilhetes vendidos</p>
                         <p className="text-themed-primary font-bold">{featured.tickets_sold} / {featured.max_tickets}</p>
                       </div>
-                      <div>
-                        <p className="text-label-caps text-themed-muted uppercase">Termina em</p>
-                        <p className="text-accent-gold font-bold flex items-center gap-1">
-                          <Clock className="w-4 h-4" /> {timeLeft(featured.ends_at)}
-                        </p>
-                      </div>
+                      {(() => {
+                        const startTime = featured.starts_at ? new Date(featured.starts_at).getTime() : null;
+                        const notStarted = startTime && startTime > Date.now();
+                        if (notStarted) {
+                          return (
+                            <div>
+                              <p className="text-label-caps text-themed-muted uppercase">Começa em</p>
+                              <p className="text-accent-gold font-bold flex items-center gap-1">
+                                <Clock className="w-4 h-4" /> <CountdownText targetDate={featured.starts_at!} />
+                              </p>
+                            </div>
+                          );
+                        }
+                        return featured.ends_at ? (
+                          <div>
+                            <p className="text-label-caps text-themed-muted uppercase">Termina em</p>
+                            <p className="text-accent-gold font-bold flex items-center gap-1">
+                              <Clock className="w-4 h-4" /> <CountdownText targetDate={featured.ends_at} />
+                            </p>
+                          </div>
+                        ) : (
+                          <div>
+                            <p className="text-label-caps text-themed-muted uppercase">Termina</p>
+                            <p className="text-accent-gold font-bold flex items-center gap-1">
+                              <Clock className="w-4 h-4" /> Após venda total
+                            </p>
+                          </div>
+                        );
+                      })()}
                     </div>
                     <ProgressBar pct={featured.pct_sold} />
                     {featured.server_seed_hash && (
@@ -381,7 +408,7 @@ export default function RifasPage() {
                       </div>
                     ) : (
                       <Button
-                        className="bg-gradient-to-r from-accent-games to-accent-gold text-zinc-950 font-bold px-8 hover:brightness-110"
+                        className="bg-accent-bisno text-zinc-950 hover:brightness-110 font-bold px-8"
                         onClick={() => buyTicket(featured.id)}
                         disabled={buying === featured.id}
                       >
@@ -421,11 +448,29 @@ export default function RifasPage() {
                       <span className="text-themed-muted flex items-center gap-1">
                         <Users className="w-3.5 h-3.5" /> {rifa.tickets_sold}/{rifa.max_tickets}
                       </span>
-                      {rifa.status === "active" && (
-                        <span className="text-themed-muted flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5" /> {timeLeft(rifa.ends_at)}
-                        </span>
-                      )}
+                      {(() => {
+                        const startTime = rifa.starts_at ? new Date(rifa.starts_at).getTime() : null;
+                        const notStarted = startTime && startTime > Date.now();
+                        if (notStarted) {
+                          return (
+                            <span className="text-accent-gold flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" /> <CountdownText targetDate={rifa.starts_at!} />
+                            </span>
+                          );
+                        }
+                        if (rifa.status === "active") {
+                          return rifa.ends_at ? (
+                            <span className="text-themed-muted flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" /> <CountdownText targetDate={rifa.ends_at} />
+                            </span>
+                          ) : (
+                            <span className="text-themed-muted flex items-center gap-1">
+                              <Clock className="w-3.5 h-3.5" /> Venda total
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                     {rifa.status === "active" && <ProgressBar pct={rifa.pct_sold} />}
                     <div className="flex items-center justify-between pt-2 border-t border-white/5 mt-auto">
@@ -441,7 +486,7 @@ export default function RifasPage() {
                           </Button>
                         )}
                         {rifa.status === "active" && !isCreator(rifa) && (
-                          <Button size="sm" variant="glass" className="border-accent-games/30 text-accent-games hover:bg-accent-games/10"
+                          <Button size="sm" variant="glass" className="border-accent-bisno/30 text-accent-bisno hover:bg-accent-bisno/10"
                             onClick={() => buyTicket(rifa.id)} disabled={buying === rifa.id}>
                             {buying === rifa.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Ticket className="w-3.5 h-3.5 mr-1" />}
                             Comprar
@@ -495,6 +540,20 @@ export default function RifasPage() {
                   <span>{formatAOA(rifa.ticket_price_centavos)} / bilhete</span>
                   <span>{rifa.max_tickets} bilhetes</span>
                 </div>
+                {rifa.starts_at && (
+                  <div className="text-xs text-themed-muted flex items-center gap-1">
+                    <Play className="w-3 h-3" /> Início: {new Date(rifa.starts_at).toLocaleString("pt-AO")}
+                  </div>
+                )}
+                {rifa.ends_at ? (
+                  <div className="text-xs text-themed-muted flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> Fim: {new Date(rifa.ends_at).toLocaleString("pt-AO")}
+                  </div>
+                ) : (
+                  <div className="text-xs text-themed-muted flex items-center gap-1">
+                    <Clock className="w-3 h-3" /> Fim: Após venda total
+                  </div>
+                )}
                 <label className="flex items-center gap-2 text-xs text-themed-muted">
                   <span>Venda mínima:</span>
                   <input type="number" min={0} max={rifa.max_tickets}
@@ -506,10 +565,10 @@ export default function RifasPage() {
                         await load(true);
                       } catch { /* */ }
                     }}
-                    className="w-16 glass-panel border border-white/10 rounded-lg px-2 py-1 text-themed-primary outline-none focus:border-accent-games/50" />
+                    className="w-16 glass-panel border border-white/10 rounded-lg px-2 py-1 text-themed-primary outline-none focus:border-accent-bisno/50" />
                 </label>
                 <div className="flex gap-2 mt-auto pt-2 border-t border-white/5">
-                  <Button size="sm" className="bg-accent-feed text-white hover:brightness-110 flex-1"
+                  <Button size="sm" className="bg-accent-bisno text-zinc-950 hover:brightness-110 flex-1"
                     onClick={() => activateRaffle(rifa.id)} disabled={activating === rifa.id}>
                     {activating === rifa.id ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> : <Play className="w-3.5 h-3.5 mr-1" />}
                     Activar
@@ -525,7 +584,7 @@ export default function RifasPage() {
           {rifas.filter(r => r.status === "draft").length === 0 && (
             <div className="glass-panel rounded-xl p-8 text-center">
               <AlertTriangle className="w-12 h-12 text-themed-muted mx-auto mb-4" />
-              <p className="text-themed-muted">Nenhum rascunho. Cria uma nova rifa!</p>
+              <p className="text-themed-muted">Nenhum rascunho. Cria um novo sorteio!</p>
             </div>
           )}
         </>
@@ -584,7 +643,7 @@ export default function RifasPage() {
       {/* ── Delivery Code Confirmation Modal ── */}
       {deliveryLookupResult && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-w-lg border border-white/10 my-2 sm:my-4 mx-auto">
+          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-h-[85dvh] overflow-y-auto max-w-lg border border-white/10 my-2 sm:my-4 mx-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Confirmar Entrega</h3>
               <button onClick={() => { setDeliveryLookupResult(null); setDeliveryCodeInput(""); setDeliveryLookupError(""); }} className="p-1 hover:bg-white/5 rounded-lg transition-colors">
@@ -632,7 +691,7 @@ export default function RifasPage() {
                   onClick={() => { setDeliveryLookupResult(null); setDeliveryCodeInput(""); }}>
                   Cancelar
                 </Button>
-                <Button className="flex-1 bg-accent-games text-white hover:brightness-110"
+                <Button className="flex-1 bg-accent-bisno text-zinc-950 hover:brightness-110"
                   onClick={async () => {
                     setDeliveryConfirmLoading(true);
                     setDeliveryLookupError("");
@@ -662,7 +721,7 @@ export default function RifasPage() {
       {/* ── Ticket Grid Modal ── */}
       {showTicketModal && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-w-xl border border-white/10 my-2 sm:my-4 mx-auto">
+          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-h-[85dvh] overflow-y-auto max-w-xl border border-white/10 my-2 sm:my-4 mx-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">{showTicketModal.title}</h3>
               <button onClick={() => { setShowTicketModal(null); setReservation(null); }} className="p-1 hover:bg-white/5 rounded-lg transition-colors">
@@ -685,7 +744,7 @@ export default function RifasPage() {
 
             {/* Stats bar */}
             <div className="flex items-center justify-between text-xs text-themed-muted mb-3 gap-2">
-              <span><Clock className="w-3 h-3 inline mr-1" />{timeLeft(showTicketModal.ends_at)}</span>
+              <span><Clock className="w-3 h-3 inline mr-1" />{showTicketModal.ends_at ? <CountdownText targetDate={showTicketModal.ends_at} /> : "Venda total"}</span>
               <span><Users className="w-3 h-3 inline mr-1" />{showTicketModal.tickets_sold}/{showTicketModal.max_tickets}</span>
               {showTicketModal.creator_id === user?.id && (
                 <span><Coins className="w-3 h-3 inline mr-1" />{formatAOA(showTicketModal.total_raised_centavos)}</span>
@@ -700,7 +759,7 @@ export default function RifasPage() {
                 </p>
                 <p className="text-xs text-themed-muted mb-3">Reserva expira em {ticketCountdown}s</p>
                 <div className="flex gap-2">
-                  <Button className="bg-accent-games text-white hover:brightness-110 flex-1"
+                  <Button className="bg-accent-bisno text-zinc-950 hover:brightness-110 flex-1"
                     onClick={handleConfirmPurchase} disabled={purchasing}>
                     {purchasing ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Ticket className="w-4 h-4 mr-2" />}
                     Comprar Agora
@@ -734,7 +793,7 @@ export default function RifasPage() {
                               isSold && "bg-white/5 text-themed-muted/30 border-white/5 cursor-not-allowed line-through",
                               isReserved && !isMine && "bg-accent-gold/10 text-accent-gold/50 border-accent-gold/20 cursor-not-allowed",
                               isMine && "bg-accent-gold/20 text-accent-gold border-accent-gold/40",
-                              !isSold && !isReserved && "bg-white/5 text-themed-primary border-white/10 hover:bg-accent-games/20 hover:border-accent-games/50 cursor-pointer",
+                              !isSold && !isReserved && "bg-white/5 text-themed-primary border-white/10 hover:bg-accent-bisno/20 hover:border-accent-bisno/50 cursor-pointer",
                             )}
                             title={isSold ? "Vendido" : isReserved ? "Reservado" : "Disponível"}>
                             {t.ticket_number}
@@ -774,7 +833,7 @@ export default function RifasPage() {
       {/* ── Participants Modal ── */}
       {showParticipants && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-          <div className="glass-panel rounded-2xl p-4 sm:p-6 w-full max-w-md border border-white/10 my-2 sm:my-4 mx-auto">
+          <div className="glass-panel rounded-2xl p-4 sm:p-6 w-full max-h-[85dvh] overflow-y-auto max-w-md border border-white/10 my-2 sm:my-4 mx-auto">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Participantes ({participants.length})</h3>
               <button onClick={() => setShowParticipants(null)} className="p-1 hover:bg-white/5 rounded-lg transition-colors">
@@ -805,15 +864,15 @@ export default function RifasPage() {
         const isDraft = r.status === "draft";
         return (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-            <div className="glass-panel rounded-2xl p-6 w-full max-w-md border border-white/10">
+            <div className="glass-panel rounded-2xl p-6 w-full max-h-[85dvh] overflow-y-auto max-w-md border border-white/10">
               <h3 className="text-h3 font-space-grotesk text-themed-primary mb-2">
-                {isDraft ? "Cancelar Rascunho?" : "Cancelar Rifa?"}
+                {isDraft ? "Cancelar Rascunho?" : "Cancelar Sorteio?"}
               </h3>
               {isDraft ? (
                 <p className="text-themed-muted text-sm mb-4">Tens a certeza? O rascunho será cancelado.</p>
               ) : (
                 <p className="text-themed-muted text-sm mb-4">
-                  A rifa tem {r.tickets_sold} bilhete(s) vendido(s). Serão reembolsados automaticamente.
+                  O sorteio tem {r.tickets_sold} bilhete(s) vendido(s). Serão reembolsados automaticamente.
                 </p>
               )}
               {error && <p className="text-accent-sos text-sm mb-3">{error}</p>}
@@ -836,23 +895,23 @@ export default function RifasPage() {
       {/* ── Create Raffle Modal ── */}
       {showCreate && (
         <div className="fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black/60 backdrop-blur-sm p-2 sm:p-4 overflow-y-auto">
-          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-w-xl border border-white/10 my-2 sm:my-4 mx-auto">
+          <div className="glass-panel luminous-edge rounded-2xl p-4 sm:p-6 w-full max-h-[85dvh] overflow-y-auto max-w-xl border border-white/10 my-2 sm:my-4 mx-auto">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-h3 font-space-grotesk text-themed-primary">Criar Rifa</h3>
+              <h3 className="text-h3 font-space-grotesk text-themed-primary">Criar Sorteio</h3>
               <button onClick={() => setShowCreate(false)} className="p-1 hover:bg-white/5 rounded-lg transition-colors">
                 <X className="w-5 h-5 text-themed-muted" />
               </button>
             </div>
 
             <p className="text-body-sm text-themed-muted mb-4">
-              A rifa será criada em <strong>rascunho</strong>. Depois de configurada, podes activá-la para começar a vender bilhetes.
+              O sorteio será criado em <strong>rascunho</strong>. Depois de configurado, podes activá-lo para começar a vender bilhetes.
             </p>
 
             {/* Image upload */}
             <div className="mb-4">
               <label className="text-label-caps text-themed-muted uppercase text-xs mb-2 block">Imagem do prémio</label>
               <div
-                className="w-full h-24 sm:h-32 glass-panel border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-accent-games/50 transition-colors overflow-hidden"
+                className="w-full h-24 sm:h-32 glass-panel border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-accent-bisno/50 transition-colors overflow-hidden"
                 onClick={() => fileRef.current?.click()}
               >
                 {imagePreview ? (
@@ -877,14 +936,14 @@ export default function RifasPage() {
                 <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">Título</label>
                 <input type="text" value={form.title}
                   onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-games/50"
+                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-bisno/50"
                   placeholder="Ex: iPhone 15 Pro Max" />
               </div>
               <div>
                 <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">URL do vídeo (opcional)</label>
                 <input type="url" value={form.video_url}
                   onChange={e => setForm(f => ({ ...f, video_url: e.target.value }))}
-                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-games/50"
+                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-bisno/50"
                   placeholder="https://youtube.com/..." />
               </div>
             </div>
@@ -894,37 +953,53 @@ export default function RifasPage() {
               <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">Descrição</label>
               <textarea value={form.description}
                 onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-games/50 resize-none h-20"
+                className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-bisno/50 resize-none h-20"
                 placeholder="Descreve o prémio..." />
             </div>
 
-            {/* Price, Tickets, Ends at row */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            {/* Price, Tickets, Starts at, Ends at row */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">Início (opcional)</label>
+                <input type="datetime-local" value={form.starts_at}
+                  onChange={e => setForm(f => ({ ...f, starts_at: e.target.value }))}
+                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-bisno/50" />
+                <p className="text-xs text-themed-muted mt-1">Deixe vazio para activar manualmente.</p>
+              </div>
+              <div>
+                <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">Encerramento</label>
+                <input type="datetime-local" value={form.ends_at}
+                  onChange={e => setForm(f => ({ ...f, ends_at: e.target.value }))}
+                  disabled={endOnSoldOut}
+                  className={cn("w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-bisno/50", endOnSoldOut && "opacity-40 cursor-not-allowed")} />
+                <label className="flex items-center gap-2 mt-2 text-xs text-themed-muted cursor-pointer">
+                  <input type="checkbox" checked={endOnSoldOut} onChange={e => setEndOnSoldOut(e.target.checked)}
+                    className="rounded border-white/20 bg-white/5 text-accent-bisno focus:ring-accent-bisno" />
+                  Terminar após venda de todos os bilhetes
+                </label>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
               <div>
                 <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">Preço (AOA)</label>
                 <input type="number" value={form.ticket_price}
                   onChange={e => setForm(f => ({ ...f, ticket_price: e.target.value }))}
-                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-games/50"
+                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-bisno/50"
                   placeholder="500" />
               </div>
               <div>
                 <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">Nº bilhetes</label>
                 <input type="number" value={form.max_tickets}
                   onChange={e => setForm(f => ({ ...f, max_tickets: e.target.value }))}
-                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-games/50"
+                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-bisno/50"
                   placeholder="1000" />
-              </div>
-              <div>
-                <label className="text-label-caps text-themed-muted uppercase text-xs mb-1 block">Encerramento</label>
-                <input type="datetime-local" value={form.ends_at}
-                  onChange={e => setForm(f => ({ ...f, ends_at: e.target.value }))}
-                  className="w-full glass-panel border border-white/10 rounded-xl px-4 py-3 text-themed-primary outline-none focus:border-accent-games/50" />
               </div>
             </div>
 
             {error && <p className="text-accent-sos text-sm mb-4">{error}</p>}
 
-            <Button className="w-full bg-accent-games text-white hover:brightness-110" onClick={createRaffle} disabled={creating}>
+            <Button className="w-full bg-accent-bisno text-zinc-950 hover:brightness-110" onClick={createRaffle} disabled={creating}>
               {creating ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
               Criar como Rascunho
             </Button>

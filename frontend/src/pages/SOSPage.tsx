@@ -10,42 +10,15 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import MapPicker from "@/components/ui/MapPicker";
 import {
-  sosApi, timeAgo,
+  sosApi, timeAgo, timeLeft,
   type SOSAlert, type MissingPerson, type LostFound, type Campaign,
 } from "@/services/modules";
 import { extractApiError } from "@/services/api";
 import { useAuthStore } from "@/stores/authStore";
-
-type SOSTab = "alertas" | "desaparecidos" | "achados" | "campanhas";
-
-const emergencyCategories = [
-  { icon: Car,         label: "Acidente",          value: "acidente",          color: "text-accent-sos",   bg: "bg-accent-sos/10"   },
-  { icon: Flame,       label: "Incêndio",          value: "incendio",          color: "text-accent-gold",  bg: "bg-accent-gold/10"  },
-  { icon: ShieldAlert, label: "Assalto",           value: "assalto",           color: "text-accent-sos",   bg: "bg-accent-sos/10"   },
-  { icon: Heart,       label: "Emergência Médica", value: "emergencia_medica", color: "text-red-400",      bg: "bg-red-400/10"      },
-  { icon: Baby,        label: "Criança Perdida",   value: "crianca_perdida",   color: "text-accent-bisno", bg: "bg-accent-bisno/10" },
-  { icon: HelpCircle,  label: "Outro",             value: "outro",             color: "text-zinc-400",     bg: "bg-white/5"         },
-];
-
-const categoryContact: Record<string, { label: string; number: string }> = {
-  acidente:          { label: "CISP", number: "111" },
-  incendio:          { label: "CISP", number: "111" },
-  assalto:           { label: "CISP", number: "111" },
-  emergencia_medica: { label: "CISP", number: "111" },
-  crianca_perdida:   { label: "CISP", number: "111" },
-  outro:             { label: "CISP", number: "111" },
-};
-
-const contacts = [
-  { label: "CISP", number: "111", icon: ShieldAlert, color: "text-accent-sos" },
-];
-
-const tabs: { id: SOSTab; label: string; icon: React.ElementType; }[] = [
-  { id: "alertas",       label: "Alertas",           icon: AlertTriangle },
-  { id: "desaparecidos", label: "Desaparecidos",      icon: UserX         },
-  { id: "achados",       label: "Achados e Perdidos", icon: Package       },
-  { id: "campanhas",     label: "Campanhas",          icon: Heart         },
-];
+import {
+  emergencyCategories, categoryContact, contacts, SOSTabs,
+  type SOSTab,
+} from "@/lib/sosConstants";
 
 export default function SOSPage() {
   const navigate = useNavigate();
@@ -83,6 +56,7 @@ export default function SOSPage() {
   const [coords, setCoords] = useState<{ lat: number; lng: number; accuracy?: number } | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval>>();
   const pendingCategoryRef = useRef<string>("");
+  const countdownStartedRef = useRef(false);
 
   const [campaignTab,        setCampaignTab]         = useState<"all" | "mine">("all");
   const [showCampaignModal,  setShowCampaignModal]   = useState(false);
@@ -126,6 +100,7 @@ export default function SOSPage() {
   useEffect(() => { loadTab(activeTab); }, [activeTab, missingFilter, campaignTab, alertsFilter]);
 
   function startCountdown(category: string) {
+    countdownStartedRef.current = true;
     pendingCategoryRef.current = category;
     setCountdown(5);
     countdownRef.current = setInterval(() => {
@@ -140,21 +115,15 @@ export default function SOSPage() {
   }
 
   useEffect(() => {
+    if (!countdownStartedRef.current) return;
     if (countdown !== null || !pendingCategoryRef.current) return;
     executeSendAlert(pendingCategoryRef.current);
     pendingCategoryRef.current = "";
+    countdownStartedRef.current = false;
   }, [countdown]);
 
   async function executeSendAlert(category: string) {
     setSubmitting(true); setError("");
-    try {
-      if ("geolocation" in navigator) {
-        const pos = await new Promise<GeolocationPosition>((resolve) =>
-          navigator.geolocation.getCurrentPosition(resolve, () => {}, { enableHighAccuracy: true, timeout: 8000 }),
-        );
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) });
-      }
-    } catch {}
     try {
       const fd = new FormData();
       fd.append("category", category);
@@ -216,6 +185,15 @@ export default function SOSPage() {
     if (alert.location_name) text += ` em ${alert.location_name}`;
     if (alert.latitude && alert.longitude) text += `\n📍 https://www.google.com/maps?q=${alert.latitude},${alert.longitude}`;
     if (alert.description) text += `: ${alert.description}`;
+    const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(url, "_blank");
+  }
+
+  function shareMissing(person: MissingPerson) {
+    let text = `👤 Pessoa Desaparecida - ${person.name}`;
+    if (person.age) text += ` (${person.age} anos)`;
+    if (person.last_seen_location) text += `\n📍 Visto pela última vez em ${person.last_seen_location}`;
+    if (person.description) text += `\n${person.description}`;
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, "_blank");
   }
@@ -370,7 +348,7 @@ export default function SOSPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 glass-panel p-1 rounded-full w-fit mb-6 flex-wrap">
-        {tabs.map(({ id, label, icon: Icon }) => (
+        {SOSTabs.map(({ id, label, icon: Icon }) => (
           <button key={id} onClick={() => setActiveTab(id)}
             className={cn("flex items-center gap-2 px-4 py-2 rounded-full text-body-sm font-medium transition-all",
               activeTab === id ? "bg-white/10 text-themed-primary border border-white/15" : "text-themed-muted hover:text-themed-secondary")}>
@@ -449,8 +427,8 @@ export default function SOSPage() {
                     </button>
                   </div>
                   <span className={cn("text-xs font-bold px-2 py-0.5 rounded-full",
-                    alert.status === "active" ? "text-accent-sos bg-accent-sos/10" : "text-accent-feed bg-accent-feed/10")}>
-                    {alert.status === "active" ? "Activo" : "Resolvido"}
+                    alert.status === "active" ? "text-accent-sos bg-accent-sos/10" : alert.status === "cancelled" ? "text-zinc-500 bg-zinc-500/10" : "text-accent-feed bg-accent-feed/10")}>
+                    {alert.status === "active" ? "Activo" : alert.status === "cancelled" ? "Cancelado" : "Resolvido"}
                   </span>
                   <span className="text-xs text-themed-muted flex items-center gap-1">
                     <Clock className="w-3 h-3" /> {timeAgo(alert.created_at)}
@@ -469,7 +447,8 @@ export default function SOSPage() {
               <h3 className="text-body-md font-bold text-themed-primary">Torna-te Voluntário</h3>
               <p className="text-body-sm text-themed-muted mt-0.5">Ajuda a comunidade respondendo a alertas perto de ti.</p>
             </div>
-            <Button className="flex-shrink-0 bg-accent-feed text-surface hover:brightness-110">
+            <Button className="flex-shrink-0 bg-accent-feed text-surface hover:brightness-110"
+              onClick={() => window.open("https://wa.me/555111?text=Quero+ser+voluntário+Kalie", "_blank")}>
               Voluntariar-me
             </Button>
           </div>
@@ -524,7 +503,8 @@ export default function SOSPage() {
                       {person.status !== "active" ? "Encontrado" : person.is_urgent ? "Urgente" : "Desaparecido"}
                     </span>
                   </div>
-                  <button className="text-themed-muted hover:text-themed-primary">
+                  <button onClick={() => shareMissing(person)}
+                    className="text-themed-muted hover:text-themed-primary">
                     <Share2 className="w-4 h-4" />
                   </button>
                 </div>
@@ -769,7 +749,7 @@ export default function SOSPage() {
               </div>
             </div>
             {selectedCampaign.ends_at && (
-              <p className="text-xs text-themed-muted mb-4">Termina {timeAgo(selectedCampaign.ends_at)}</p>
+              <p className="text-xs text-themed-muted mb-4">Termina {timeLeft(selectedCampaign.ends_at)}</p>
             )}
             <Button className="w-full bg-accent-feed text-surface hover:brightness-110">
               <Heart className="w-4 h-4 mr-2" /> Doar Agora
@@ -806,7 +786,7 @@ export default function SOSPage() {
           <div className="glass-panel luminous-edge rounded-2xl p-6 w-full max-w-md border border-white/10">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Enviar Alerta</h3>
-              <button onClick={() => { setShowAlertModal(false); setCountdown(null); clearInterval(countdownRef.current); }}><X className="w-5 h-5 text-themed-muted" /></button>
+              <button onClick={() => { setError(""); setShowAlertModal(false); setCountdown(null); clearInterval(countdownRef.current); }}><X className="w-5 h-5 text-themed-muted" /></button>
             </div>
             {coords && (
               <div className="mb-3">
@@ -876,7 +856,7 @@ export default function SOSPage() {
           <div className="glass-panel luminous-edge rounded-2xl p-6 w-full max-w-md border border-white/10 my-4">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Reportar Desaparecido</h3>
-              <button onClick={() => setShowMissingModal(false)}><X className="w-5 h-5 text-themed-muted" /></button>
+              <button onClick={() => { setError(""); setShowMissingModal(false); }}><X className="w-5 h-5 text-themed-muted" /></button>
             </div>
             <div className="mb-4">
               <div className="w-full h-28 glass-panel border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-accent-sos/50 transition-colors overflow-hidden"
@@ -1042,7 +1022,7 @@ export default function SOSPage() {
           <div className="glass-panel luminous-edge rounded-2xl p-6 w-full max-w-md border border-white/10 my-4">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Publicar Achado/Perdido</h3>
-              <button onClick={() => setShowLostModal(false)}><X className="w-5 h-5 text-themed-muted" /></button>
+              <button onClick={() => { setError(""); setShowLostModal(false); }}><X className="w-5 h-5 text-themed-muted" /></button>
             </div>
             <div className="mb-4">
               <div className="w-full h-24 glass-panel border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-accent-bisno/50 transition-colors overflow-hidden"
@@ -1099,7 +1079,7 @@ export default function SOSPage() {
           <div className="glass-panel luminous-edge rounded-2xl p-6 w-full max-w-md border border-white/10 my-4">
             <div className="flex items-center justify-between mb-5">
               <h3 className="text-h3 font-space-grotesk text-themed-primary">Criar Campanha</h3>
-              <button onClick={() => setShowCampaignModal(false)}><X className="w-5 h-5 text-themed-muted" /></button>
+              <button onClick={() => { setError(""); setShowCampaignModal(false); }}><X className="w-5 h-5 text-themed-muted" /></button>
             </div>
             <div className="mb-4">
               <div className="w-full h-24 glass-panel border border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-accent-feed/50 transition-colors overflow-hidden"

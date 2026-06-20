@@ -1,20 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Car, Flame, ShieldAlert, Heart, Baby, HelpCircle, X, Loader2, MapPin } from "lucide-react";
+import { AlertTriangle, X, Loader2, MapPin } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import MapPicker from "@/components/ui/MapPicker";
 import { sosApi } from "@/services/modules";
 import { extractApiError } from "@/services/api";
 import { useSOSStore } from "@/stores/sosStore";
-
-const categories = [
-  { icon: Car,         label: "Acidente",          value: "acidente",          color: "text-accent-sos",   bg: "bg-accent-sos/10"   },
-  { icon: Flame,       label: "Incêndio",          value: "incendio",          color: "text-accent-gold",  bg: "bg-accent-gold/10"  },
-  { icon: ShieldAlert, label: "Assalto",           value: "assalto",           color: "text-accent-sos",   bg: "bg-accent-sos/10"   },
-  { icon: Heart,       label: "Emergência Médica", value: "emergencia_medica", color: "text-red-400",      bg: "bg-red-400/10"      },
-  { icon: Baby,        label: "Criança Perdida",   value: "crianca_perdida",   color: "text-accent-bisno", bg: "bg-accent-bisno/10" },
-  { icon: HelpCircle,  label: "Outro",             value: "outro",             color: "text-zinc-400",     bg: "bg-white/5"         },
-];
+import { emergencyCategories } from "@/lib/sosConstants";
 
 export default function SOSQuickModal() {
   const { showQuickModal, closeQuickModal } = useSOSStore();
@@ -60,14 +52,6 @@ export default function SOSQuickModal() {
   async function sendAlert() {
     setSubmitting(true); setError("");
     try {
-      if ("geolocation" in navigator) {
-        const pos = await new Promise<GeolocationPosition>((resolve) =>
-          navigator.geolocation.getCurrentPosition(resolve, () => {}, { enableHighAccuracy: true, timeout: 8000 }),
-        );
-        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) });
-      }
-    } catch {}
-    try {
       const fd = new FormData();
       fd.append("category", category);
       if (coords) {
@@ -75,6 +59,7 @@ export default function SOSQuickModal() {
         fd.append("longitude", String(coords.lng));
       }
       await sosApi.alerts.create(fd);
+      countdownStartedRef.current = false;
       closeQuickModal();
     } catch (e) { setError(extractApiError(e)); }
     finally { setSubmitting(false); setCountdown(null); }
@@ -110,7 +95,7 @@ export default function SOSQuickModal() {
               className="text-[11px] text-accent-feed hover:underline mt-1">
               {showMapPicker ? "Fechar mapa" : "Ajustar no mapa"}
             </button>
-            {showMapPicker && coords && (
+            {showMapPicker && (
               <div className="mt-2">
                 <MapPicker
                   lat={coords.lat}
@@ -133,7 +118,7 @@ export default function SOSQuickModal() {
           <>
             <p className="text-xs text-themed-muted mb-3">Selecciona o tipo de emergência:</p>
             <div className="grid grid-cols-2 gap-2 mb-4">
-              {categories.map(({ icon: Icon, label, value, color, bg }) => (
+              {emergencyCategories.map(({ icon: Icon, label, value, color, bg }) => (
                 <button key={value} onClick={() => setCategory(value)}
                   className={cn("flex items-center gap-2 p-3 rounded-xl border transition-all text-left",
                     category === value ? "border-white/30 bg-white/10" : "border-white/5 hover:border-white/15", color, bg)}>

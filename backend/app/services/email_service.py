@@ -1,27 +1,41 @@
 """
 Email service — Hostinger SMTP via fastapi-mail.
 """
+from functools import cached_property
 from pathlib import Path
 
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
 
 from app.core.config import settings
 
-mail_config = ConnectionConfig(
-    MAIL_USERNAME=settings.SMTP_USER,
-    MAIL_PASSWORD=settings.SMTP_PASSWORD,
-    MAIL_FROM=settings.EMAILS_FROM_EMAIL,
-    MAIL_PORT=settings.SMTP_PORT,
-    MAIL_SERVER=settings.SMTP_HOST,
-    MAIL_FROM_NAME=settings.EMAILS_FROM_NAME,
-    # Porta 465 = SSL directo | Porta 587 = STARTTLS
-    MAIL_STARTTLS=settings.SMTP_PORT == 587,
-    MAIL_SSL_TLS=settings.SMTP_PORT == 465,
-    USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True,
-)
 
-fm = FastMail(mail_config)
+class _MailHelper:
+    """Lazy mail config — avoids crash when SMTP env vars are empty in dev."""
+
+    @cached_property
+    def config(self) -> ConnectionConfig | None:
+        if not settings.EMAILS_FROM_EMAIL:
+            return None
+        return ConnectionConfig(
+            MAIL_USERNAME=settings.SMTP_USER,
+            MAIL_PASSWORD=settings.SMTP_PASSWORD,
+            MAIL_FROM=settings.EMAILS_FROM_EMAIL,
+            MAIL_PORT=settings.SMTP_PORT,
+            MAIL_SERVER=settings.SMTP_HOST,
+            MAIL_FROM_NAME=settings.EMAILS_FROM_NAME,
+            MAIL_STARTTLS=settings.SMTP_PORT == 587,
+            MAIL_SSL_TLS=settings.SMTP_PORT == 465,
+            USE_CREDENTIALS=True,
+            VALIDATE_CERTS=True,
+        )
+
+    @cached_property
+    def fm(self) -> FastMail | None:
+        cfg = self.config
+        return FastMail(cfg) if cfg else None
+
+
+_mail = _MailHelper()
 
 FRONTEND_URL = "http://localhost:5173"  # override via env in prod
 
@@ -45,7 +59,10 @@ class EmailService:
             body=html,
             subtype=MessageType.html,
         )
-        await fm.send_message(message)
+        if _mail.fm is None:
+            print("⚠ Email not configured — skipping verification email")
+            return
+        await _mail.fm.send_message(message)
 
     async def send_password_reset_email(self, email: str, name: str, token: str) -> None:
         reset_url = f"{FRONTEND_URL}/redefinir-senha?token={token}"
@@ -65,4 +82,4 @@ class EmailService:
             body=html,
             subtype=MessageType.html,
         )
-        await fm.send_message(message)
+        await _mail.fm.send_message(message)

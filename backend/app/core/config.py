@@ -55,9 +55,9 @@ class Settings(BaseSettings):
     EMAILS_FROM_EMAIL: str = ""
 
     # ── Cloudinary ────────────────────────────────────────────────────────────
-    CLOUDINARY_CLOUD_NAME: str
-    CLOUDINARY_API_KEY: str
-    CLOUDINARY_API_SECRET: str
+    CLOUDINARY_CLOUD_NAME: str = ""
+    CLOUDINARY_API_KEY: str = ""
+    CLOUDINARY_API_SECRET: str = ""
 
     # ── Sulin Wallet ─────────────────────────────────────────────────────────
     SULIN_API_URL: str = "https://api.sulin.ao"

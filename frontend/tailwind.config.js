@@ -1,5 +1,5 @@
 /** Kalie Design System — matches DESIGN.md exactly */
-var config = {
+const config = {
     darkMode: "class",
     content: ["./index.html", "./src/**/*.{ts,tsx}"],
     theme: {

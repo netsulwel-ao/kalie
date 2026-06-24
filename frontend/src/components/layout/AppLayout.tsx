@@ -4,6 +4,7 @@ import TopBar from "./TopBar";
 import SideNav from "./SideNav";
 import BottomNav from "./BottomNav";
 import SOSButton from "@/components/ui/SOSButton";
+import SOSQuickModal from "@/components/ui/SOSQuickModal";
 import { cn } from "@/lib/utils";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -49,6 +50,7 @@ export default function AppLayout() {
         <BottomNav />
         <SOSButton />
         <Toaster />
+        <SOSQuickModal />
       </div>
     </SideNavContext.Provider>
   );

@@ -4,7 +4,7 @@ SOS endpoints — alerts, missing persons, lost & found, campaigns.
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,12 +102,15 @@ async def create_alert(
 @router.get("/alerts", response_model=list[AlertOut])
 async def list_alerts(
     status: str = Query("active"),
+    user_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
     q = select(SOSAlert).order_by(SOSAlert.created_at.desc()).limit(limit)
     if status != "all":
         q = q.where(SOSAlert.status == status)
+    if user_id:
+        q = q.where(SOSAlert.user_id == uuid.UUID(user_id))
     result = await db.execute(q)
     return [_alert_out(a) for a in result.scalars().all()]
 
@@ -128,6 +131,22 @@ async def resolve_alert(
     alert.resolved_at = datetime.now(timezone.utc)
     await db.commit()
     return {"message": "Alerta resolvido."}
+
+
+@router.delete("/alerts/{alert_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_alert(
+    alert_id: str,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(select(SOSAlert).where(SOSAlert.id == uuid.UUID(alert_id)))
+    alert = result.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alerta não encontrado.")
+    if str(alert.user_id) != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Sem permissão.")
+    await db.delete(alert)
+    await db.commit()
 
 
 # ── Missing Persons ───────────────────────────────────────────────────────────
@@ -260,12 +279,14 @@ async def create_campaign(
 
 @router.get("/campaigns", response_model=list[CampaignOut])
 async def list_campaigns(
+    creator_id: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(Campaign).where(Campaign.is_active == True).order_by(Campaign.created_at.desc()).limit(limit)
-    )
+    q = select(Campaign).where(Campaign.is_active == True).order_by(Campaign.created_at.desc()).limit(limit)
+    if creator_id:
+        q = q.where(Campaign.creator_id == uuid.UUID(creator_id))
+    result = await db.execute(q)
     return [_campaign_out(c) for c in result.scalars().all()]
 
 

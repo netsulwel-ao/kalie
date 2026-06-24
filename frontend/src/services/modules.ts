@@ -288,10 +288,15 @@ export const bisnoApi = {
 
 export const sosApi = {
   alerts: {
-    list: (status = "active") => api.get<SOSAlert[]>(`/sos/alerts?status=${status}`).then(r => r.data),
+    list: (status = "active", userId?: string) => {
+      let url = `/sos/alerts?status=${status}`;
+      if (userId) url += `&user_id=${userId}`;
+      return api.get<SOSAlert[]>(url).then(r => r.data);
+    },
     create: (form: FormData) =>
       api.post<SOSAlert>("/sos/alerts", form, { headers: { "Content-Type": "multipart/form-data" } }).then(r => r.data),
     resolve: (id: string) => api.patch(`/sos/alerts/${id}/resolve`).then(r => r.data),
+    delete: (id: string) => api.delete(`/sos/alerts/${id}`),
   },
   missing: {
     list: (status = "active") => api.get<MissingPerson[]>(`/sos/missing?status=${status}`).then(r => r.data),
@@ -308,7 +313,10 @@ export const sosApi = {
       api.post<LostFound>("/sos/lost-found", form, { headers: { "Content-Type": "multipart/form-data" } }).then(r => r.data),
   },
   campaigns: {
-    list: () => api.get<Campaign[]>("/sos/campaigns").then(r => r.data),
+    list: (creator_id?: string) => {
+      const q = creator_id ? `?creator_id=${creator_id}` : "";
+      return api.get<Campaign[]>(`/sos/campaigns${q}`).then(r => r.data);
+    },
     create: (form: FormData) =>
       api.post<Campaign>("/sos/campaigns", form, { headers: { "Content-Type": "multipart/form-data" } }).then(r => r.data),
   },

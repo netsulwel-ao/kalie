@@ -13,6 +13,7 @@ import ResetPasswordPage from "@/pages/auth/ResetPasswordPage";
 import VerifyEmailPage from "@/pages/auth/VerifyEmailPage";
 
 // App pages
+import LandingPage from "@/pages/LandingPage";
 import FeedPage from "@/pages/FeedPage";
 import GamesPage from "@/pages/GamesPage";
 import WalletPage from "@/pages/WalletPage";
@@ -42,6 +43,9 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 export default function App() {
   return (
     <Routes>
+      {/* Landing Page */}
+      <Route path="/landing" element={<LandingPage />} />
+      
       {/* Auth */}
       <Route element={<AuthLayout />}>
         <Route path="/entrar"         element={<PublicRoute><LoginPage /></PublicRoute>} />

@@ -39,6 +39,17 @@ async def upload_image(file: UploadFile, folder: str = "kalie") -> str:
         raise HTTPException(status_code=500, detail=f"Erro ao fazer upload da imagem: {str(e)}")
 
 
+async def upload_images(files: list[UploadFile], folder: str = "kalie") -> list[str]:
+    """Upload multiple images to Cloudinary and return a list of secure URLs."""
+    urls: list[str] = []
+    for file in files:
+        if not file.filename:
+            continue
+        url = await upload_image(file, folder=folder)
+        urls.append(url)
+    return urls
+
+
 async def delete_image(public_id: str) -> None:
     """Delete an image from Cloudinary by public_id."""
     try:

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, Link } from "react-router-dom";
 import api, { extractApiError } from "@/services/api";
+import { Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
@@ -22,29 +23,47 @@ export default function VerifyEmailPage() {
       });
   }, [token]);
 
+  const iconMap = {
+    loading: <Loader2 className="w-8 h-8 text-[#4CB5F9] animate-spin" />,
+    success: <CheckCircle2 className="w-8 h-8 text-white" />,
+    error: <AlertCircle className="w-8 h-8 text-white" />,
+  };
+
+  const bgMap = {
+    loading: "bg-blue-50",
+    success: "bg-gradient-to-br from-green-400 to-emerald-500",
+    error: "bg-gradient-to-br from-red-400 to-rose-500",
+  };
+
+  const titleMap = {
+    loading: "A verificar...",
+    success: "Email verificado!",
+    error: "Erro de verificação",
+  };
+
+  const descMap = {
+    loading: "Por favor, aguarde.",
+    success: "A sua conta está activa.",
+    error: message,
+  };
+
   return (
-    <div className="glass-panel rounded-lg p-8 luminous-edge text-center">
-      {status === "loading" && (
-        <p className="text-on-surface-variant">A verificar o seu email...</p>
-      )}
+    <div className="bg-white border border-gray-200 rounded-lg p-[40px] text-center mb-3">
+      <div className={`w-16 h-16 mx-auto mb-4 rounded-full flex items-center justify-center shadow-sm ${bgMap[status]}`}>
+        {iconMap[status]}
+      </div>
+      <h2 className="text-xl font-bold text-gray-900 mb-2">{titleMap[status]}</h2>
+      <p className="text-sm text-gray-500 mb-6">{descMap[status]}</p>
       {status === "success" && (
-        <>
-          <div className="w-16 h-16 bg-accent-feed/20 rounded-full flex items-center justify-center mx-auto mb-4">
-            <svg className="w-8 h-8 text-accent-feed" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h2 className="text-h3 font-space-grotesk text-white mb-2">Email verificado!</h2>
-          <p className="text-body-md text-on-surface-variant mb-6">A sua conta está activa.</p>
-          <Link to="/entrar" className="text-accent-bisno hover:underline font-medium">Entrar na conta</Link>
-        </>
+        <Link to="/entrar"
+          className="w-full inline-block py-[7px] bg-[#4CB5F9] hover:bg-[#3ba5e9] text-white text-sm font-semibold rounded-[8px] transition-colors text-center">
+          Entrar na conta
+        </Link>
       )}
       {status === "error" && (
-        <>
-          <h2 className="text-h3 font-space-grotesk text-error mb-2">Erro de verificação</h2>
-          <p className="text-body-md text-on-surface-variant mb-6">{message}</p>
-          <Link to="/entrar" className="text-accent-bisno hover:underline">Voltar ao login</Link>
-        </>
+        <Link to="/entrar" className="text-sm text-[#4CB5F9] font-semibold hover:text-[#3ba5e9] transition-colors">
+          Voltar ao login
+        </Link>
       )}
     </div>
   );

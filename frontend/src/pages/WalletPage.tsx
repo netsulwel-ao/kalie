@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Send, ArrowLeftRight, CreditCard, QrCode,
+  Send, CreditCard,
   TrendingUp, ShieldCheck, Loader2, Plus, X,
   ArrowUpRight, ArrowDownLeft, RefreshCw,
 } from "lucide-react";
@@ -79,7 +79,6 @@ export default function WalletPage() {
   );
 
   const available = wallet?.available_centavos ?? 0;
-  const balance = wallet?.balance_centavos ?? 0;
   const locked = wallet?.locked_centavos ?? 0;
 
   return (

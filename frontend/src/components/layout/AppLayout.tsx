@@ -5,6 +5,7 @@ import SideNav from "./SideNav";
 import BottomNav from "./BottomNav";
 import SOSButton from "@/components/ui/SOSButton";
 import { cn } from "@/lib/utils";
+import { Toaster } from "@/components/ui/toaster";
 
 // Contexto leve — partilha o estado expanded entre SideNav e AppLayout
 import { createContext, useContext } from "react";
@@ -47,6 +48,7 @@ export default function AppLayout() {
 
         <BottomNav />
         <SOSButton />
+        <Toaster />
       </div>
     </SideNavContext.Provider>
   );

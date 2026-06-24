@@ -75,6 +75,15 @@ export interface Bid {
   created_at: string;
 }
 
+export interface EventParticipant {
+  id: string;
+  user_id: string;
+  user_name: string;
+  user_email: string;
+  user_avatar: string | null;
+  attended_at: string;
+}
+
 export interface MapEvent {
   id: string;
   creator_id: string;
@@ -92,6 +101,18 @@ export interface MapEvent {
   ends_at: string | null;
   created_at: string;
   distance_km: number | null;
+  is_attending?: boolean;
+  contact_method?: string;
+  contact_value?: string | null;
+}
+
+export interface AttendeeInfo {
+  id: string;
+  user_id: string;
+  full_name: string | null;
+  username: string | null;
+  avatar_url: string | null;
+  created_at: string;
 }
 
 export interface SOSAlert {
@@ -148,6 +169,32 @@ export interface Campaign {
   pct: number;
 }
 
+export interface BisnoItem {
+  id: string;
+  creator_id: string;
+  type: "product" | "service";
+  title: string;
+  description: string;
+  category: string;
+  contact_method: "chat" | "whatsapp" | "call";
+  contact_value: string | null;
+  location_name: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  images: string[] | null;
+  price_centavos: number | null;
+  negotiable: boolean;
+  condition: "new" | "used" | null;
+  price_type: "hourly" | "fixed" | "negotiable" | null;
+  service_modality: "home" | "in_person" | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  distance_km: number | null;
+  creator_name: string | null;
+  creator_avatar: string | null;
+}
+
 // ── Wallet ────────────────────────────────────────────────────────────────────
 
 export const walletApi = {
@@ -202,7 +249,39 @@ export const eventsApi = {
   create: (form: FormData) =>
     api.post<MapEvent>("/events", form, { headers: { "Content-Type": "multipart/form-data" } }).then(r => r.data),
   attend: (id: string) => api.post(`/events/${id}/attend`).then(r => r.data),
+  unattend: (id: string) => api.delete(`/events/${id}/attend`).then(r => r.data),
+  attendees: (id: string) => api.get<AttendeeInfo[]>(`/events/${id}/attendees`).then(r => r.data),
   delete: (id: string) => api.delete(`/events/${id}`).then(r => r.data),
+};
+
+// ── Bisno ──────────────────────────────────────────────────────────────────────
+
+export const bisnoApi = {
+  list: (params?: {
+    type?: string; category?: string; status?: string;
+    price_type?: string; q?: string;
+    lat?: number; lon?: number; radius_km?: number;
+    limit?: number; offset?: number;
+  }) => {
+    const q = new URLSearchParams();
+    if (params?.type) q.set("type", params.type);
+    if (params?.category) q.set("category", params.category);
+    if (params?.status) q.set("status", params.status);
+    if (params?.price_type) q.set("price_type", params.price_type);
+    if (params?.q) q.set("q", params.q);
+    if (params?.lat) q.set("lat", String(params.lat));
+    if (params?.lon) q.set("lon", String(params.lon));
+    if (params?.radius_km) q.set("radius_km", String(params.radius_km));
+    if (params?.limit) q.set("limit", String(params.limit));
+    if (params?.offset) q.set("offset", String(params.offset));
+    return api.get<BisnoItem[]>(`/bisno?${q}`).then(r => r.data);
+  },
+  get: (id: string) => api.get<BisnoItem>(`/bisno/${id}`).then(r => r.data),
+  create: (form: FormData) =>
+    api.post<BisnoItem>("/bisno", form, { headers: { "Content-Type": "multipart/form-data" } }).then(r => r.data),
+  update: (id: string, body: Record<string, any>) =>
+    api.patch<BisnoItem>(`/bisno/${id}`, body).then(r => r.data),
+  delete: (id: string) => api.delete(`/bisno/${id}`).then(r => r.data),
 };
 
 // ── SOS ───────────────────────────────────────────────────────────────────────

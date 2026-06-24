@@ -5,9 +5,10 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
   ImageIcon, PlusCircle, Heart, MessageCircle,
-  Share2, TrendingUp, Zap, Send, X, Loader2,
+  Share2, TrendingUp, Zap, Send, Loader2,
 } from "lucide-react";
 import api, { extractApiError } from "@/services/api";
+import { eventsApi, type MapEvent } from "@/services/modules";
 import { cn } from "@/lib/utils";
 import { formatDistanceToNow } from "@/lib/dateUtils";
 
@@ -145,6 +146,11 @@ export default function FeedPage() {
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [activeBisnos, setActiveBisnos] = useState<MapEvent[]>([]);
+
+  useEffect(() => {
+    eventsApi.list({ category: "bisno" }).then(setActiveBisnos).catch(() => {});
+  }, []);
 
   useEffect(() => { loadFeed(1); }, []);
 
@@ -279,19 +285,20 @@ export default function FeedPage() {
               <h3 className="text-body-md font-bold text-themed-primary">{t("feed.active_bisnos")}</h3>
             </div>
             <div className="flex flex-col gap-2">
-              {[
-                { label: "Entrega de Compras",   price: "1.500 AOA", dist: "2,1 km" },
-                { label: "Transporte Aeroporto", price: "4.000 AOA", dist: "15 min" },
-                { label: "Correcção de Código",  price: "2.500 AOA", dist: "Remoto" },
-              ].map(({ label, price, dist }) => (
-                <div key={label} className="glass-panel-light p-3 rounded-xl flex justify-between items-center hover:bg-white/10 transition-colors cursor-pointer">
-                  <p className="text-body-sm font-semibold text-themed-primary">{label}</p>
-                  <div className="text-right">
-                    <p className="text-body-sm font-bold text-accent-bisno">{price}</p>
-                    <p className="text-xs text-themed-muted">{dist}</p>
+              {activeBisnos.length > 0 ? activeBisnos.slice(0, 3).map((b) => {
+                const budget = b.description?.match(/\[ORÇAMENTO:\s*([\d\s.]+)\s*AOA\]/)?.[1];
+                return (
+                  <div key={b.id} className="glass-panel-light p-3 rounded-xl flex justify-between items-center hover:bg-white/10 transition-colors cursor-pointer">
+                    <p className="text-body-sm font-semibold text-themed-primary">{b.title}</p>
+                    <div className="text-right">
+                      <p className="text-body-sm font-bold text-accent-bisno">{budget ? `${Number(budget).toLocaleString("pt-AO")} AOA` : "—"}</p>
+                      <p className="text-xs text-themed-muted">{b.location_name ?? "Angola"}</p>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              }) : (
+                <p className="text-xs text-themed-muted text-center py-4">Nenhum bisno activo</p>
+              )}
             </div>
           </div>
         </div>

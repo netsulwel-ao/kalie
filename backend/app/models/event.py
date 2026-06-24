@@ -27,6 +27,18 @@ class EventStatus(str, Enum):
     FINISHED  = "finished"
 
 
+class EventAttendee(Base):
+    __tablename__ = "event_attendees"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    event_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("events.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    event: Mapped["Event"] = relationship("Event", foreign_keys=[event_id], back_populates="attendees")
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -54,3 +66,4 @@ class Event(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
     creator: Mapped["User"] = relationship("User", foreign_keys=[creator_id])  # type: ignore
+    attendees: Mapped[list["EventAttendee"]] = relationship("EventAttendee", foreign_keys=[EventAttendee.event_id], back_populates="event", cascade="all, delete-orphan")

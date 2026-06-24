@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import {
   Gavel, Clock, Users, ShieldCheck, ChevronUp,
-  Lock, CheckCircle, AlertCircle, Eye, Plus, X, Loader2, Upload,
+  Lock, CheckCircle, AlertCircle, Plus, X, Loader2, Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";

@@ -29,8 +29,7 @@ class WalletOut(BaseModel):
     available_centavos: int
     balance_aoa: float
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class TransactionOut(BaseModel):
@@ -43,8 +42,7 @@ class TransactionOut(BaseModel):
     external_ref: str | None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class DepositRequest(BaseModel):
@@ -79,8 +77,21 @@ def _sign_transaction(tx: Transaction) -> str:
     return hmac.new(settings.SECRET_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
 
 
-async def _get_or_create_wallet(user_id: uuid.UUID, db: AsyncSession) -> Wallet:
+async def _get_wallet(user_id: uuid.UUID, db: AsyncSession) -> Wallet:
     result = await db.execute(select(Wallet).where(Wallet.user_id == user_id))
+    wallet = result.scalar_one_or_none()
+    if not wallet:
+        wallet = Wallet(user_id=user_id, balance_centavos=0, locked_centavos=0)
+        db.add(wallet)
+        await db.flush()
+    return wallet
+
+
+async def _get_wallet_for_update(user_id: uuid.UUID, db: AsyncSession) -> Wallet:
+    """Fetch wallet with row-level lock (SELECT FOR UPDATE) for safe concurrent writes."""
+    result = await db.execute(
+        select(Wallet).where(Wallet.user_id == user_id).with_for_update()
+    )
     wallet = result.scalar_one_or_none()
     if not wallet:
         wallet = Wallet(user_id=user_id, balance_centavos=0, locked_centavos=0)
@@ -96,7 +107,7 @@ async def get_wallet(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    wallet = await _get_or_create_wallet(current_user.id, db)
+    wallet = await _get_wallet(current_user.id, db)
     await db.commit()
     return WalletOut(
         id=str(wallet.id),
@@ -114,7 +125,7 @@ async def get_transactions(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    wallet = await _get_or_create_wallet(current_user.id, db)
+    wallet = await _get_wallet(current_user.id, db)
     await db.commit()
     result = await db.execute(
         select(Transaction)
@@ -142,7 +153,7 @@ async def deposit(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    wallet = await _get_or_create_wallet(current_user.id, db)
+    wallet = await _get_wallet_for_update(current_user.id, db)
     wallet.balance_centavos += body.amount_centavos
 
     tx = Transaction(
@@ -177,7 +188,8 @@ async def withdraw(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    wallet = await _get_or_create_wallet(current_user.id, db)
+    # Lock row to prevent race conditions on balance check
+    wallet = await _get_wallet_for_update(current_user.id, db)
     if wallet.available_centavos < body.amount_centavos:
         raise HTTPException(status_code=400, detail="Saldo insuficiente.")
 
@@ -217,17 +229,17 @@ async def transfer(
     if str(current_user.id) == body.to_user_id:
         raise HTTPException(status_code=400, detail="Não podes transferir para ti mesmo.")
 
-    sender_wallet = await _get_or_create_wallet(current_user.id, db)
+    # Lock sender wallet to prevent race conditions
+    sender_wallet = await _get_wallet_for_update(current_user.id, db)
     if sender_wallet.available_centavos < body.amount_centavos:
         raise HTTPException(status_code=400, detail="Saldo insuficiente.")
 
-    # Get recipient
     result = await db.execute(select(User).where(User.id == uuid.UUID(body.to_user_id)))
     recipient = result.scalar_one_or_none()
     if not recipient:
         raise HTTPException(status_code=404, detail="Utilizador destinatário não encontrado.")
 
-    recipient_wallet = await _get_or_create_wallet(recipient.id, db)
+    recipient_wallet = await _get_wallet(recipient.id, db)
 
     sender_wallet.balance_centavos -= body.amount_centavos
     recipient_wallet.balance_centavos += body.amount_centavos

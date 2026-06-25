@@ -20,7 +20,7 @@ import { useSideNav } from "./AppLayout";
 import { useAuthStore } from "@/stores/authStore";
 
 const navItems = [
-  { to: "/",         icon: Home,        label: "nav.feed",       exact: true  },
+  { to: "/feed",     icon: Home,        label: "nav.feed",       exact: true  },
   { to: "/jogos",    icon: Gamepad2,    label: "nav.games"                    },
   { to: "/torneios", icon: Trophy,      label: "nav.tournaments"              },
   { to: "/rifas",    icon: Ticket,      label: "nav.raffles"                  },

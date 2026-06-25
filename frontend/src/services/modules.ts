@@ -165,7 +165,6 @@ export interface AuctionDeliveryStatus {
   delivery_status: string;
   status: string;
 }
-}
 
 export interface MapEvent {
   id: string;

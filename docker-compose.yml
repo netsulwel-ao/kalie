@@ -10,6 +10,8 @@ services:
   db:
     image: postgres:15-alpine
     container_name: kalie_db
+    ports:
+      - "5432:5432"
     environment:
       POSTGRES_DB: kalie_dev
       POSTGRES_USER: kalie_user

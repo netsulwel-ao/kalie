@@ -99,6 +99,8 @@ async def get_current_verified_user(
     return current_user
 
 
+get_optional_current_user = get_optional_user
+
 # Type aliases for cleaner route signatures
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]

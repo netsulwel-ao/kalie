@@ -37,15 +37,20 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
 
 function PublicRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated } = useAuthStore();
-  return !isAuthenticated ? <>{children}</> : <Navigate to="/" replace />;
+  return !isAuthenticated ? <>{children}</> : <Navigate to="/feed" replace />;
+}
+
+function HomeRoute() {
+  const { isAuthenticated } = useAuthStore();
+  return isAuthenticated ? <Navigate to="/feed" replace /> : <LandingPage />;
 }
 
 export default function App() {
   return (
     <Routes>
-      {/* Landing Page */}
-      <Route path="/landing" element={<LandingPage />} />
-      
+      {/* Landing Page (raiz — se não logado) */}
+      <Route path="/" element={<HomeRoute />} />
+
       {/* Auth */}
       <Route element={<AuthLayout />}>
         <Route path="/entrar"         element={<PublicRoute><LoginPage /></PublicRoute>} />
@@ -57,7 +62,7 @@ export default function App() {
 
       {/* App */}
       <Route element={<PrivateRoute><AppLayout /></PrivateRoute>}>
-        <Route path="/"          element={<FeedPage />} />
+        <Route path="/feed"      element={<FeedPage />} />
         <Route path="/jogos"     element={<GamesPage />} />
         <Route path="/jogos/xadrez/:challengeId" element={<ChessPage />} />
         <Route path="/jogos/tictactoe/:challengeId" element={<TicTacToePage />} />
